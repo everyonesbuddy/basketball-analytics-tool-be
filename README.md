@@ -617,8 +617,3 @@ npm run dev
 ```
 
 Default port is `5000`.
-
-## Known Scope Limits
-
-- Five-man lineup net rating is out of scope with current ESPN public payloads because possession-level on-court lineup tracking is not provided.
-- Upstream ESPN payload shape can change; normalization logic is the primary adaptation layer.
