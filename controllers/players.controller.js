@@ -8,6 +8,9 @@ const {
 const {
   getAthleteOptions: getPlayerOptions,
 } = require("../services/espn/athletes.service");
+const {
+  getPlayerUsageValue,
+} = require("../services/aggregation/usageValueAggregator");
 
 function parseForceRefresh(query) {
   return String(query.forceRefresh || "false").toLowerCase() === "true";
@@ -158,6 +161,20 @@ async function getPlayerTrajectoryController(req, res) {
   });
 }
 
+async function getPlayerUsageValueController(req, res) {
+  const athleteId = validateAthleteId(req.params.athleteId, "athleteId");
+  const forceRefresh = parseForceRefresh(req.query);
+
+  const data = await getPlayerUsageValue(athleteId, {
+    forceRefresh,
+  });
+
+  return res.status(200).json({
+    success: true,
+    data,
+  });
+}
+
 module.exports = {
   getPlayerProfileController,
   comparePlayersController,
@@ -166,4 +183,5 @@ module.exports = {
   getPlayerImpactController,
   getPlayerCompsController,
   getPlayerTrajectoryController,
+  getPlayerUsageValueController,
 };

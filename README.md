@@ -61,6 +61,13 @@ Returns service status and timestamp.
 - Optional query: `forceRefresh=true`.
 - Optional query: `split=auto|regular|postseason|career`.
 
+`GET /api/players/:athleteId/usage-value`
+
+- Benchmarks player production against league peers in the same usage-rate bucket.
+- Uses regular-season eligible sample (`minGames`, `minMinutes`) and z-score classification.
+- Usage is sourced from ESPN usage fields when available; otherwise a core-statistics usage-load proxy is derived from FGA, FTA, AST, TO, and MIN.
+- Optional query: `forceRefresh=true`.
+
 `GET /api/players/:athleteId/trajectory?games=20&window=5`
 
 - Returns within-season development curve with rolling scoring and efficiency signals.
@@ -210,6 +217,25 @@ Player trajectory output includes:
 - `trajectory[]` per game with raw metrics and rolling metrics
 - `lastUpdatedAt`, `_cache`
 
+## Player Usage Value Output
+
+Player usage value output includes:
+
+- `athleteId`
+- `splitUsed` (currently `Regular Season`)
+- `usagePct`, `usageBucket`
+- `expectedProduction`, `actualProduction`
+- `zScore`, `status`
+- `bucketSampleSize`
+- `gamesPlayed`, `avgMinutes`
+- `sourceSplit`
+- `actionableStats` (actual vs expected ranges for tracked raw stats)
+- `expectedStatRanges` (bucket-level expected means/ranges for points, rebounds, assists, steals, blocks, turnovers, efficiencyIndex)
+- `decisionInsights` (summary + GM/coach action suggestions)
+- `benchmarkContext` (sample and bucket construction settings)
+- `warning` when classification cannot be produced
+- `lastUpdatedAt`, `_cache`
+
 ## Interpretation Notes
 
 - Value comps represent statistical profile similarity, not exact play-style identity.
@@ -287,6 +313,10 @@ This section is a full reference for request variables, internal variables, cach
   - Query: `games`, `window`, `seasonType`, `forceRefresh`.
   - Defaults: `games=20`, `window=5`, `seasonType=all`.
 
+- `GET /api/players/:athleteId/usage-value`
+  - Path: `athleteId`.
+  - Query: `forceRefresh`.
+
 #### Teams
 
 - `GET /api/teams`
@@ -330,6 +360,8 @@ This section is a full reference for request variables, internal variables, cach
   - Player impact: `player-impact:{athleteId}:{games}:{seasonType}` (3 minutes).
   - Player comps: `player-comps:v6:{athleteId}:{limit}:{sampleSize}:{split}` (10 minutes).
   - Player trajectory: `player-trajectory:{athleteId}:{games}:{window}:{seasonType}` (5 minutes).
+  - Usage-value baseline: `usage-value:baseline:v3:...` (20 minutes).
+  - Usage-value player result: `usage-value:player:v3:{athleteId}` (5 minutes).
   - Teams list: `teams:all:{normalizedQuery}` (15 minutes).
   - Player options: `player-options:{limit}:{offset}:{normalizedQuery}` (15 minutes).
   - Team efficiency: `team-efficiency:{teamId}:{games}:{seasonType}` (5 minutes).
@@ -436,6 +468,56 @@ This section is a full reference for request variables, internal variables, cach
   - Each comp row also includes:
     - `sampleStability` (0.35 to 1.0 reliability factor used in score adjustment).
     - `gamesPlayed` (from the split used for comparison, when available).
+
+### Player Usage Value Variable Map
+
+- Sample eligibility variables:
+  - `minGames` (default 15)
+  - `minMinutes` (default 10)
+  - `splitUsed` (current implementation uses `Regular Season` rows)
+
+- Usage derivation variables:
+  - `usagePct` prefers direct usage aliases (`usageRate`, `usagePct`, `USG`) when present and positive.
+  - If direct usage is missing/zero, fallback derives usage load from core stats:
+    - `usageLoad = ((FGA + 0.44 * FTA + 0.33 * AST + TO) * 40) / MIN`.
+
+- Bucket construction variables:
+  - `bucketWidth = 5` usage-percentage points.
+  - Initial buckets are usage ranges like `10-15`, `15-20`, etc.
+  - Sparse buckets are merged until each merged bucket reaches `minBucketSize` (default 20) where possible.
+
+- Production benchmark variables:
+  - `actualProduction` uses `efficiencyIndex`:
+    - `efficiencyIndex = points + rebounds + assists + steals + blocks - turnovers`.
+  - `expectedProduction` is bucket mean of `efficiencyIndex`.
+  - `zScore = (actualProduction - expectedProduction) / bucketStdDev`.
+
+- Actionable stat benchmark variables:
+  - `expectedStatRanges` are computed per usage bucket for:
+    - `points`, `rebounds`, `assists`, `steals`, `blocks`, `turnovers`, `efficiencyIndex`.
+  - Each stat includes:
+    - `expectedMean`
+    - `stdDev`
+    - `expectedRange.low` and `expectedRange.high` (mean +/- 1 std dev).
+  - `actionableStats` adds player-level comparison for each tracked stat:
+    - `actual`, `expectedMean`, `expectedRange`, `deltaFromMean`, `signal`.
+  - `signal` semantics:
+    - `better_than_expected`, `within_expected_range`, `worse_than_expected`.
+    - For `turnovers`, lower values are treated as better.
+
+- Classification variable:
+  - `status = above_expected_range` when `zScore > 1`.
+  - `status = below_expected_range` when `zScore < -1`.
+  - `status = in_expected_range` otherwise.
+
+- Decision insight variables:
+  - `decisionInsights.summary` gives the high-level usage-adjusted value read.
+  - `decisionInsights.gm[]` gives roster/role strategy suggestions.
+  - `decisionInsights.coach[]` gives on-court adjustment suggestions tied to stat signals.
+
+- Output context variables:
+  - `usagePct`, `usageBucket`, `bucketSampleSize`.
+  - `benchmarkContext` returns sample and bucket settings used for the benchmark.
 
 ### Player Trajectory Variable Map
 

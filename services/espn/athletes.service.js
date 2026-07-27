@@ -54,6 +54,10 @@ async function getCoreAthleteProfile(athleteId) {
   return getJson(endpoints.coreAthleteById(athleteId));
 }
 
+async function getCoreAthleteStatistics(athleteId, params = {}) {
+  return getJson(endpoints.coreAthleteStatistics(athleteId), params);
+}
+
 async function getAthleteSplitViews(athleteId) {
   const [regularSeason, career] = await Promise.all([
     getAthleteSplits(athleteId),
@@ -142,6 +146,7 @@ module.exports = {
   getAthleteSplits,
   getAthleteGamelog,
   getCoreAthleteProfile,
+  getCoreAthleteStatistics,
   getAthleteSplitViews,
   getAthleteOptions,
   getAthleteBundle,
