@@ -698,4 +698,232 @@ npm install
 npm run dev
 ```
 
+## NFL Fantasy Tools
+
+The NFL fantasy API uses ESPN's public `kona_player_info` data through the
+`lm-api-reads.fantasy.espn.com` reads host. It is unauthenticated and uses ESPN
+projections, public ownership, and public ADP data. All NFL fantasy routes are
+mounted under `/api/fantasy`.
+
+### Common Fantasy Inputs
+
+- `scoringId` selects the scoring format used when ESPN calculates fantasy
+  projections:
+  - `1`: Standard
+  - `3`: PPR (default)
+  - `4`: Half-PPR
+- `season` is the ESPN fantasy season year. When omitted, the backend uses
+  ESPN's authoritative active fantasy season rather than a calendar guess.
+- `forceRefresh=true` bypasses the process-local cache.
+- `teamCount` and `starters` affect replacement-level calculations for the
+  draft board and trade analyzer. Defaults are a 12-team league with
+  `QB:1,RB:2,WR:2,TE:1,FLEX:1,K:1,DST:1`.
+- `starters` is serialized as a comma-separated query value, for example:
+  `QB:1,RB:2,WR:2,TE:1,FLEX:1,K:1,DST:1`.
+
+The frontend must refetch a feature when its relevant settings change. In
+particular, PPR results must not be reused after a user changes to Standard or
+Half-PPR.
+
+### Fantasy Season State
+
+`GET /api/fantasy/season`
+
+Returns the current ESPN fantasy season and current scoring period:
+
+```json
+{
+  "success": true,
+  "data": {
+    "season": 2026,
+    "active": true,
+    "currentScoringPeriod": 1,
+    "startDate": "2026-03-25T07:00:00.000Z"
+  }
+}
+```
+
+Use this endpoint at application startup to set default season context and to
+decide whether draft or in-season tools are currently actionable.
+
+### VORP Draft Board
+
+`GET /api/fantasy/draft-board?scoringId=3&teamCount=12&starters=QB:1,RB:2,WR:2,TE:1,FLEX:1,K:1,DST:1`
+
+Optional query values:
+
+- `position=QB|RB|WR|TE|K|DST|FLEX`
+- `rosterSoFar=4429795,4426515` (comma-separated ESPN player IDs to exclude)
+- `season`
+- `forceRefresh`
+
+The board ranks players by value over replacement player (VORP), not raw
+projected points:
+
+```text
+VORP = projectedTotal - replacementBaseline
+```
+
+The replacement baseline is the projected total of the player at the replacement
+rank for each position. That rank is derived from league size, required starters,
+and FLEX allocation. This prevents raw QB projections from incorrectly
+dominating RB/WR draft recommendations.
+
+Important response fields:
+
+- `tierMetric`: always `vorp`; tier `high`, `low`, `mean`, and `stdDev` values
+  use VORP, not fantasy points.
+- `replacementBaselines`: per-position replacement rank, player, and projected
+  total used for calculations.
+- Candidate `vorp`: projected value above replacement; higher is better.
+- Candidate `vorpRank`: overall rank by VORP among available players.
+- Candidate `tier`: natural-break VORP tier; a tier drop indicates scarcity.
+- Candidate `projectedTotal`: ESPN full-season projected fantasy points.
+
+Use VORP and tiers as the primary draft UI. Keep `projectedTotal` as supporting
+context. Re-query with `rosterSoFar` as players are drafted so available tiers
+and rankings reflect the live board.
+
+### Sleepers / Draft Values
+
+`GET /api/fantasy/sleepers?scoringId=3&season=2026`
+
+This is a draft-season feature. It compares ESPN ADP rank to projection rank
+within each position, then standardizes that gap among positional peers:
+
+```text
+adpDelta = positional ADP rank - positional projection rank
+sleeperScore = z-score of adpDelta within the position
+```
+
+Positive `adpDelta` and positive `sleeperScore` indicate a player ESPN projects
+better than their draft cost. Show this as a draft-value signal, not a guarantee.
+
+When ESPN no longer supplies usable ADP (normally after drafts), the API excludes
+placeholder ADP values and may return zero evaluated players. The frontend should
+show a draft-values-unavailable state instead of an error.
+
+### Trade Analyzer
+
+`GET /api/fantasy/trades/analyze?sideA=4429795,4426515&sideB=4362628&scoringId=3&teamCount=12&starters=QB:1,RB:2,WR:2,TE:1,FLEX:1,K:1,DST:1`
+
+Required query values:
+
+- `sideA`: comma-separated ESPN player IDs.
+- `sideB`: comma-separated ESPN player IDs.
+
+The analyzer applies the same league-aware VORP baselines as the draft board,
+sums VORP on both sides, and returns:
+
+- `sideA.totalVorp`, `sideB.totalVorp`: summed player VORP.
+- `netVorpToA`: `sideB.totalVorp - sideA.totalVorp`.
+- `verdict`: `balanced`, `slight_edge`, or `clear_edge`.
+- `byPosition`: each side's VORP contribution by position.
+- `missingPlayerIds`: requested IDs not present in the available player pool.
+
+The UI should make the side convention explicit, such as “You Give” and “You
+Receive.” Present VORP totals and positional breakdown together; a verdict alone
+does not capture roster construction needs.
+
+### Waiver Wire
+
+`GET /api/fantasy/waivers?scoringId=3&ownershipMax=50&window=4`
+
+Optional query values:
+
+- `ownershipMax`: maximum public ESPN ownership percentage, default `50`.
+- `window`: recent completed-game sample, default `4`, allowed `2-10`.
+
+The waiver tool requires at least two actual games and ranks eligible players by:
+
+```text
+recentForm.deltaFromProjection = recent actual average - recent projected average
+```
+
+Use it to identify lower-owned players outperforming ESPN expectations. Pair a
+positive delta with `ownershipPct` and `recentForm.standardDeviation`: high delta
+signals a breakout, while lower standard deviation indicates a steadier profile.
+
+Before enough games are complete, `status` is `insufficient_sample` with an empty
+candidate array. This is expected and should render as an informative empty state.
+
+### Consistency Leaders
+
+`GET /api/fantasy/consistency?scoringId=3&window=4`
+
+This feature requires at least three completed games. It ranks recent floor using:
+
+```text
+consistencyScore = recent actual average - weekly standard deviation
+```
+
+Higher scores indicate players combining recent production with lower volatility.
+Use this for floor-sensitive lineup decisions, not as a ceiling ranking. Show
+`actualAverage`, `standardDeviation`, and `consistencyScore` together.
+
+### Start / Sit
+
+`GET /api/fantasy/start-sit?playerIds=4429795,4426515&scoringId=3&window=4`
+
+Required query value:
+
+- `playerIds`: comma-separated ESPN player IDs.
+
+For each player, the API combines ESPN's next scoring-period projection with
+recent actual weekly results. The recommendation is:
+
+- `start`: enough actual-game sample and recent form is at or above projection.
+- `consider_sit`: enough sample but recent form is below projection.
+- `insufficient_sample`: fewer than two actual games.
+- `no_upcoming_projection`: ESPN has no next-week projection, such as after a
+  completed season.
+
+The UI should prioritize `nextProjection`, then show `recentForm.actualAverage`,
+`recentForm.deltaFromProjection`, and recent weekly history. These
+recommendations do not yet include opponent matchups, weather, or late injury
+news.
+
+### Fantasy Player Data Contract
+
+The normalized fantasy player contract distinguishes projections from actuals:
+
+```json
+{
+  "projectedTotal": 364.87,
+  "actualTotal": null,
+  "keyStats": {
+    "projected": {
+      "rushAttempts": 283.1,
+      "rushingYards": 1372.6,
+      "rushingTouchdowns": 14.5
+    },
+    "actual": null
+  }
+}
+```
+
+- All `projected*` values and `keyStats.projected` are ESPN expectations for the
+  selected season and scoring format. Fractional volume or touchdown values are
+  normal projections.
+- `actual*` values and `keyStats.actual` are completed-game production. They are
+  `null` before the player has real production, rather than a misleading zero.
+- `weeklySplits[]` holds both weekly actual and projected scoring values. Use
+  `isProjection` to distinguish them.
+- `adpIsPlaceholder=true` means ESPN's ADP is not actionable and should be hidden
+  from draft-value UI.
+- Friendly `keyStats` are available for QB/RB/WR/TE. Kicker and D/ST friendly
+  stat maps are currently `null`; their source maps remain in `rawStats`.
+
+### Fantasy Cache Behavior
+
+- Normalized player pool: 15 minutes.
+- Draft board: 5 minutes.
+- Trade analyzer: 5 minutes.
+- Sleepers: 10 minutes.
+- Season state: 15 minutes.
+- Waiver and consistency results: 5 minutes.
+
+Use `forceRefresh=true` only for an explicit user refresh or debugging; normal UI
+navigation should rely on cached responses.
+
 Default port is `5000`.
