@@ -700,4 +700,5 @@ async function getTeamNeedGap(teamId, options = {}) {
 module.exports = {
   getTeamEfficiency,
   getTeamNeedGap,
+  mapWithConcurrency,
 };

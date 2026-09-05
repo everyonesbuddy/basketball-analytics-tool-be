@@ -11,6 +11,11 @@ const {
   getConsistencyLeaders,
   getStartSit,
 } = require("../services/aggregation/inSeasonAssistant");
+const {
+  compareFantasyPlayers,
+  compareFantasyTeams,
+  getFantasyTeamGrade,
+} = require("../services/aggregation/fantasyTeamTools");
 const { SCORING_IDS } = require("../config/nflEndpoints");
 
 const ALLOWED_SCORING_IDS = new Set(Object.values(SCORING_IDS));
@@ -93,10 +98,36 @@ function validateRosterSoFar(value) {
 }
 
 function validatePlayerIds(value, label, required = false) {
-  const ids = validateRosterSoFar(value);
+  if (value === undefined || value === "") {
+    if (required) {
+      const error = new Error(
+        `${label} must contain at least one fantasy player ID`,
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+    return [];
+  }
+
+  const rawIds = Array.isArray(value) ? value : String(value).split(",");
+  const ids = rawIds
+    .map((entry) => String(entry).trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const id = Number(entry);
+      if (!Number.isInteger(id) || id === 0) {
+        const error = new Error(
+          `${label} must be a comma-separated list of non-zero integer fantasy player IDs`,
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+      return id;
+    });
+
   if (required && !ids.length) {
     const error = new Error(
-      `${label} must contain at least one positive integer`,
+      `${label} must contain at least one fantasy player ID`,
     );
     error.statusCode = 400;
     throw error;
@@ -155,7 +186,7 @@ async function getDraftBoardController(req, res) {
   const scoringId = validateScoringId(req.query.scoringId);
   const position = validatePosition(req.query.position);
   const season = validateSeason(req.query.season);
-  const rosterSoFar = validateRosterSoFar(req.query.rosterSoFar);
+  const rosterSoFar = validatePlayerIds(req.query.rosterSoFar, "rosterSoFar");
   const leagueSettings = validateLeagueSettings(req.query);
   const forceRefresh = parseForceRefresh(req.query);
 
@@ -244,6 +275,66 @@ async function getStartSitController(req, res) {
   return res.status(200).json({ success: true, data });
 }
 
+async function compareFantasyPlayersController(req, res) {
+  const playerAId = validatePlayerIds(req.query.playerAId, "playerAId", true);
+  const playerBId = validatePlayerIds(req.query.playerBId, "playerBId", true);
+
+  if (playerAId.length !== 1 || playerBId.length !== 1) {
+    const error = new Error(
+      "playerAId and playerBId must each contain one positive integer",
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (playerAId[0] === playerBId[0]) {
+    const error = new Error(
+      "playerAId and playerBId must be different players",
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const data = await compareFantasyPlayers({
+    playerAId: playerAId[0],
+    playerBId: playerBId[0],
+    scoringId: validateScoringId(req.query.scoringId),
+    season: validateSeason(req.query.season),
+    leagueSettings: validateLeagueSettings(req.query),
+    forceRefresh: parseForceRefresh(req.query),
+  });
+
+  return res.status(200).json({ success: true, data });
+}
+
+async function compareFantasyTeamsController(req, res) {
+  const rosterAIds = validatePlayerIds(req.query.rosterA, "rosterA", true);
+  const rosterBIds = validatePlayerIds(req.query.rosterB, "rosterB", true);
+  const data = await compareFantasyTeams({
+    rosterAIds,
+    rosterBIds,
+    scoringId: validateScoringId(req.query.scoringId),
+    season: validateSeason(req.query.season),
+    leagueSettings: validateLeagueSettings(req.query),
+    forceRefresh: parseForceRefresh(req.query),
+  });
+
+  return res.status(200).json({ success: true, data });
+}
+
+async function getFantasyTeamGradeController(req, res) {
+  const rosterIds = validatePlayerIds(req.query.roster, "roster", true);
+  const data = await getFantasyTeamGrade({
+    rosterIds,
+    scoringId: validateScoringId(req.query.scoringId),
+    season: validateSeason(req.query.season),
+    leagueSettings: validateLeagueSettings(req.query),
+    forceRefresh: parseForceRefresh(req.query),
+  });
+
+  return res.status(200).json({ success: true, data });
+}
+
 module.exports = {
   getSeasonStateController,
   getDraftBoardController,
@@ -252,4 +343,7 @@ module.exports = {
   getWaiverWireController,
   getConsistencyController,
   getStartSitController,
+  compareFantasyPlayersController,
+  compareFantasyTeamsController,
+  getFantasyTeamGradeController,
 };

@@ -93,6 +93,29 @@ Returns service status and timestamp.
 - Supported `seasonType`: `regular`, `postseason`, `all`.
 - Optional query: `forceRefresh=true`.
 
+`GET /api/teams/:teamId/grade?games=5&seasonType=regular`
+
+- Returns a recent team grade normalized against the league using offensive
+  rating, defensive rating, net rating, and recent win rate.
+- `games` controls the recent completed-game sample and is clamped to `1-15`.
+- `seasonType` supports `regular`, `postseason`, and `all`.
+- The grade is a relative snapshot for the requested sample, not a permanent
+  team quality label.
+
+`GET /api/teams/compare/head-to-head?teamAId=17&teamBId=20&games=5&seasonType=regular`
+
+- Compares two teams across the same four metrics used by team grading.
+- Returns each team's aggregate efficiency and grade, per-metric advantages,
+  and an overall `teamA`, `teamB`, or `tie` result.
+- `teamAId` and `teamBId` must be positive, different team ids.
+
+Team grade scoring is relative to the available league sample. Higher offensive
+rating, net rating, and win rate are better; lower defensive rating is better.
+The weighted score is `netRtg 40%`, `offRtg 25%`, `defRtg 25%`, and `winRate 10%`.
+Each metric is standardized against the league mean and standard deviation, then
+mapped to a bounded 0-100 score and letter grade: `A >= 85`, `B >= 70`,
+`C >= 55`, `D >= 40`, otherwise `F`.
+
 ## Response Envelope
 
 Successful responses use the same envelope:
@@ -824,6 +847,71 @@ sums VORP on both sides, and returns:
 The UI should make the side convention explicit, such as “You Give” and “You
 Receive.” Present VORP totals and positional breakdown together; a verdict alone
 does not capture roster construction needs.
+
+### Fantasy Roster Head-to-Head
+
+`GET /api/fantasy/compare/head-to-head?rosterA=4429795,4362628&rosterB=4430807,4360310&scoringId=3&teamCount=12&starters=QB:1,RB:2,WR:2,TE:1,FLEX:1,K:1,DST:1`
+
+- Compares two complete fantasy rosters, not individual players.
+- `rosterA` and `rosterB` are comma-separated ESPN fantasy player IDs.
+- Selects the best starting lineup from each roster using the configured per-team
+  starter slots, then compares starter VORP and lineup coverage.
+- Returns each roster's full players, suggested starters, starter VORP, position
+  breakdown, missing IDs, and the overall `rosterA`, `rosterB`, or `tie` result.
+- This is projected roster value, not a game matchup win probability.
+
+Use visible UI labels such as “Your roster” and “Opponent roster.” The endpoint is
+useful for comparing fantasy teams, dynasty roster strength, and hypothetical
+lineups. `teamCount` affects league-wide VORP replacement baselines; starter slots
+determine which players are selected from each individual roster.
+
+### Fantasy Player Head-to-Head
+
+`GET /api/fantasy/compare/players?playerAId=4429795&playerBId=4362628&scoringId=3&teamCount=12&starters=QB:1,RB:2,WR:2,TE:1,FLEX:1,K:1,DST:1`
+
+Use this route when the UI needs to compare two individual players. It returns
+projected points, VORP, ADP, projected positional rank, actual totals, and
+projected/actual key stats for both players.
+
+The comparison is useful for draft decisions, waiver choices, lineup choices, and
+trade discussions. VORP is the primary cross-position value signal; raw projected
+points and ADP provide supporting context.
+
+### Fantasy Team / Roster Grade
+
+`GET /api/fantasy/team-grade?roster=4429795,4362628,4430807,4360310,3116365,4869461,-16024&scoringId=3&teamCount=12&starters=QB:1,RB:2,WR:2,TE:1,FLEX:1,K:1,DST:1`
+
+- `roster` is a required comma-separated list of ESPN fantasy player IDs.
+- Uses the selected scoring format and league settings.
+- Selects the best possible starting lineup from the submitted roster using the
+  per-team starter slots. `teamCount` is used only for league-wide VORP
+  replacement baselines.
+- `valueScore` measures the roster's selected-starter quality relative to the
+  league's positional starter/replacement ranges. It no longer divides by the
+  absolute best lineup in the entire player pool, which made realistic A grades
+  effectively impossible.
+- `marketScore` measures how strongly the roster's starters are valued by current
+  public ADP relative to each position's replacement rank. It is the available
+  market signal, not private league draft history.
+- `coverageScore` measures how much of the configured lineup the roster can fill.
+- When usable ADP exists, the final score weights league-relative starter value `50%`, public ADP
+  market value `25%`, and lineup coverage `25%`.
+- When ADP is unavailable or placeholder-only, the final score falls back to
+  starter VORP `70%` and lineup coverage `30%`.
+- Returns `grade` (`A` through `F`), `score`, `suggestedStarters`, roster player
+  details, `missingStarterSlots`, replacement baselines, and missing IDs.
+
+`valueScore` maps a player at replacement level to approximately 50 and elite
+players toward 100 within each position. This makes the score league-relative:
+an 8-team roster is judged against 8-team starter demand, not against the top
+three players at every position.
+
+Use this as a roster-construction snapshot, not a prediction of wins or an exact
+copy of ESPN's proprietary draft grade. ESPN's grade may use private league draft
+history and internal ranking logic; this API uses public ESPN ADP, projections,
+league size, starter slots, and VORP. A roster with elite players but missing
+required positions can still score lower because coverage is part of the grade.
+Recalculate after roster changes or when scoring/league settings change.
 
 ### Waiver Wire
 

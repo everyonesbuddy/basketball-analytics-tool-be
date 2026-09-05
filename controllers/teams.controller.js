@@ -3,6 +3,10 @@ const {
   getTeamNeedGap,
 } = require("../services/aggregation/teamEfficiencyAggregator");
 const { getAllTeams } = require("../services/espn/teams.service");
+const {
+  getTeamGrade,
+  compareTeamHeadToHead,
+} = require("../services/aggregation/teamGradeAggregator");
 
 function parseForceRefresh(query) {
   return String(query.forceRefresh || "false").toLowerCase() === "true";
@@ -82,8 +86,54 @@ async function getTeamNeedGapController(req, res) {
   });
 }
 
+async function getTeamGradeController(req, res) {
+  const teamId = validateTeamId(req.params.teamId);
+  const forceRefresh = parseForceRefresh(req.query);
+  const games = parsePositiveInteger(req.query.games, 5);
+  const seasonType = parseSeasonType(req.query.seasonType);
+
+  const data = await getTeamGrade(teamId, {
+    games,
+    forceRefresh,
+    seasonType,
+  });
+
+  return res.status(200).json({
+    success: true,
+    data,
+  });
+}
+
+async function compareTeamsController(req, res) {
+  const teamAId = validateTeamId(req.query.teamAId, "teamAId");
+  const teamBId = validateTeamId(req.query.teamBId, "teamBId");
+
+  if (teamAId === teamBId) {
+    const error = new Error("teamAId and teamBId must be different teams");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const forceRefresh = parseForceRefresh(req.query);
+  const games = parsePositiveInteger(req.query.games, 5);
+  const seasonType = parseSeasonType(req.query.seasonType);
+
+  const data = await compareTeamHeadToHead(teamAId, teamBId, {
+    games,
+    forceRefresh,
+    seasonType,
+  });
+
+  return res.status(200).json({
+    success: true,
+    data,
+  });
+}
+
 module.exports = {
   getAllTeamsController,
   getTeamEfficiencyController,
   getTeamNeedGapController,
+  getTeamGradeController,
+  compareTeamsController,
 };
