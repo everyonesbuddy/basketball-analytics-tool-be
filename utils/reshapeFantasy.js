@@ -186,9 +186,7 @@ function normalizePlayer(rawEntry = {}, options = {}) {
     projectedAverage: hasProjectionValue
       ? roundNullable(projection?.appliedAverage, 2)
       : null,
-    projectedGames: finiteNumber(
-      projection?.stats?.[sport.gamesPlayedStatId],
-    ),
+    projectedGames: finiteNumber(projection?.stats?.[sport.gamesPlayedStatId]),
     // Before kickoff ESPN sends an actuals row of 0; that is "not played yet", not a score.
     actualTotal: hasActualProduction
       ? roundNullable(actual?.appliedTotal, 2)

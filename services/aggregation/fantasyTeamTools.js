@@ -500,10 +500,7 @@ async function getFantasyTeamGrade(options = {}) {
     return result;
   }, {});
   const missingSlots = {};
-  for (const slot of [
-    ...sport.positions,
-    ...Object.keys(sport.flexSlots),
-  ]) {
+  for (const slot of [...sport.positions, ...Object.keys(sport.flexSlots)]) {
     const shortfall = (league.starters[slot] || 0) - (filledBySlot[slot] || 0);
     if (shortfall > 0) missingSlots[slot] = shortfall;
   }

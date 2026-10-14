@@ -58,7 +58,9 @@ function validatePosition(value, sport) {
   const position = String(value).trim().toUpperCase();
   const allowed = allowedSlots(sport);
   if (!allowed.has(position)) {
-    const error = new Error(`position must be one of ${[...allowed].join(", ")}`);
+    const error = new Error(
+      `position must be one of ${[...allowed].join(", ")}`,
+    );
     error.statusCode = 400;
     throw error;
   }
