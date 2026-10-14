@@ -2,6 +2,7 @@ const express = require("express");
 const asyncHandler = require("../utils/asyncHandler");
 const {
   getSeasonStateController,
+  getDraftSimulatorController,
   getDraftBoardController,
   getSleepersController,
   analyzeTradeController,
@@ -19,6 +20,7 @@ router.use((req, _res, next) => {
 
 router.get("/season", asyncHandler(getSeasonStateController));
 router.get("/draft-board", asyncHandler(getDraftBoardController));
+router.get("/draft-simulator", asyncHandler(getDraftSimulatorController));
 router.get("/sleepers", asyncHandler(getSleepersController));
 router.get(
   "/compare/head-to-head",

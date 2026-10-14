@@ -1062,4 +1062,81 @@ Waivers, consistency, and start/sit are NFL-only. NBA fantasy game data is
 per-game (daily scoring periods) rather than weekly, so those tools need a
 separate design.
 
+## Draft Simulator
+
+`GET /api/fantasy/draft-simulator` (NFL) and `GET /api/fantasy/nba/draft-simulator`
+play your draft out many times from your slot and league settings, then report
+which directions look strongest and what to do at your next pick. It works before
+the draft and mid-draft.
+
+```text
+GET /api/fantasy/draft-simulator?draftPosition=5&teamCount=12&scoringId=3
+GET /api/fantasy/draft-simulator?draftPosition=5&teamCount=12&picks=4429795,4430807
+```
+
+### Inputs
+
+- `draftPosition` (required): your slot, `1` to `teamCount`.
+- `teamCount`, `starters`, `scoringId`, `season`: same meaning as the draft board.
+- `rounds`: defaults to `15` for NFL and `13` for NBA, allowed `1-25`.
+- `simulations`: default `150`, allowed `20-400`. More runs are smoother but slower.
+- `picks`: every player id drafted so far, in pick order, including your own.
+  Your picks are identified by your slot, so you do not mark them separately.
+- `strategies`: optional comma list to limit directions. `best_value` is always
+  included as the baseline. NFL: `rb_heavy`, `wr_heavy`, `hero_rb`, `zero_rb`,
+  `early_qb`, `early_te`. NBA: `guards_first`, `bigs_first`, `forwards_first`.
+- `forceRefresh`: bypasses the 5-minute cache.
+
+The draft is a snake draft. Identical inputs return identical results, so the UI
+does not jitter between refreshes.
+
+### What you get back
+
+- `situation`: your pick numbers, how many picks have been made, and how many picks
+  remain until yours (`yourNextPick.picksUntilYou`).
+- `pickOptions`: for your next pick, each realistic candidate (available in at
+  least 20% of simulations) with `availabilityPct`, `expectedLineupVorp`, and
+  `vsBestValue.meanDifference`, which is what taking that player instead of the
+  default pick changes about your final lineup. `isDefaultPick` marks the default.
+- `nextPickAvailability`: the top players by value and the share of simulations in
+  which each is still available when you pick.
+- `strategies`: each direction, ranked, with `starterVorp` (`mean`, `p10`, `p50`,
+  `p90`), `vsBestValue` (mean difference and how often it beats Best value on the
+  same simulated draft), `lineupCompletePct`, average `positionMix`, and a
+  round-by-round `pickPlan` of the most common picks.
+- `decisionInsights` and `assumptions`: plain-language summary and modelling notes.
+
+### How it works
+
+1. Players are valued with the same league-aware VORP as the draft board.
+2. Other teams pick the best available player by ADP plus noise
+   (`sd = 1 + 0.12 x ADP`, capped at 20), so no one is taken at exactly their ADP.
+   Teams stop taking a position at its cap (NFL: QB 2, RB 6, WR 6, TE 2, K 1, D/ST 1).
+   Players with no usable ADP are ordered by projection.
+3. You pick the player who most improves your starting lineup, not simply the
+   highest VORP, so a third RB is worth little once your RB slots are full.
+   K and D/ST wait for the final rounds unless a starting slot must be filled.
+4. Every strategy is run on the same simulated drafts, so differences between
+   strategies come from the strategy, not luck. `pickOptions` also replays those
+   drafts, forces each candidate at your next pick, and compares the outcome with
+   the default pick on the identical draft.
+
+### Reading the results
+
+- Best value usually ranks first. It adapts to what the draft gives you and is scored
+  on the same VORP measure, while position-first plans are constraints. A strategy
+  that trails is not wrong; the gap tells you what the plan costs, and
+  `positionMix` and `pickPlan` show what it builds. Treat close strategies as ties.
+- `vsBestValue.meanDifference` of `0` on a pick option can be correct: if you pick
+  twice in a row (the turn of a snake), taking the other player first still lets the
+  default logic take the first one at your second pick.
+- `pickOptions` shows a `sampleSize`. A low count means the player is rarely
+  available at your pick, so treat that estimate loosely.
+
+### Limits
+
+Opponents are modelled from ADP, not from their actual rosters or needs, and
+projections are ESPN's public expectations. Results are expected value across many
+simulated drafts, not a prediction of any single draft. Snake format only.
+
 Default port is `5000`.

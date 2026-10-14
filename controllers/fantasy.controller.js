@@ -17,6 +17,9 @@ const {
   getFantasyTeamGrade,
 } = require("../services/aggregation/fantasyTeamTools");
 const { getSport } = require("../config/fantasySports");
+const {
+  getDraftSimulation,
+} = require("../services/aggregation/draftSimulator");
 
 const sportOf = (req) => getSport(req.fantasySport || "nfl");
 
@@ -365,7 +368,58 @@ async function getFantasyTeamGradeController(req, res) {
   return res.status(200).json({ success: true, data });
 }
 
+async function getDraftSimulatorController(req, res) {
+  const sport = sportOf(req);
+  const leagueSettings = validateLeagueSettings(req.query, sport);
+
+  if (req.query.draftPosition === undefined || req.query.draftPosition === "") {
+    const error = new Error("draftPosition is required");
+    error.statusCode = 400;
+    throw error;
+  }
+  const draftPosition = validateIntegerInRange(
+    req.query.draftPosition,
+    "draftPosition",
+    null,
+    1,
+    leagueSettings.teamCount,
+  );
+
+  const strategyKeys = String(req.query.strategies || "")
+    .split(",")
+    .map((key) => key.trim())
+    .filter(Boolean);
+
+  const data = await getDraftSimulation({
+    sport: sport.key,
+    scoringId: validateScoringId(req.query.scoringId, sport),
+    season: validateSeason(req.query.season),
+    leagueSettings,
+    draftPosition,
+    rounds: validateIntegerInRange(
+      req.query.rounds,
+      "rounds",
+      sport.draft.defaultRounds,
+      1,
+      25,
+    ),
+    simulations: validateIntegerInRange(
+      req.query.simulations,
+      "simulations",
+      150,
+      20,
+      400,
+    ),
+    picks: validatePlayerIds(req.query.picks, "picks"),
+    strategyKeys: strategyKeys.length ? strategyKeys : null,
+    forceRefresh: parseForceRefresh(req.query),
+  });
+
+  return res.status(200).json({ success: true, data });
+}
+
 module.exports = {
+  getDraftSimulatorController,
   getSeasonStateController,
   getDraftBoardController,
   getSleepersController,
