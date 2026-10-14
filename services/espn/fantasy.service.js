@@ -1,5 +1,6 @@
 const axios = require("axios");
-const { endpoints, SCORING_LABELS } = require("../../config/nflEndpoints");
+const { endpoints } = require("../../config/nflEndpoints");
+const { getSport } = require("../../config/fantasySports");
 
 const DEFAULT_TIMEOUT_MS = 20000;
 
@@ -39,8 +40,9 @@ function buildPlayerFilter(options = {}) {
   };
 }
 
-async function fetchFantasyPlayers(year, scoringId, filter) {
-  const url = endpoints.fantasyPlayers(year, scoringId);
+async function fetchFantasyPlayers(year, scoringId, filter, sportKey = "nfl") {
+  const sport = getSport(sportKey);
+  const url = endpoints.fantasyPlayers(year, scoringId, sport.gameKey);
   const appliedFilter = filter || buildPlayerFilter();
 
   let response;
@@ -98,8 +100,8 @@ async function fetchFantasyPlayers(year, scoringId, filter) {
   return payload;
 }
 
-function describeScoring(scoringId) {
-  return SCORING_LABELS[scoringId] || String(scoringId);
+function describeScoring(scoringId, sportKey = "nfl") {
+  return getSport(sportKey).scoring.labels[scoringId] || String(scoringId);
 }
 
 module.exports = {

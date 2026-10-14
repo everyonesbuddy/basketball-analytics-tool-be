@@ -60,7 +60,9 @@ function check(label, passed, detail) {
     `${nullProjections.length} players have no projection`,
   );
 
+  // Injured-reserve players carry a 0 projection and an empty stat map mid-season.
   const keyStatsOk = draftableSkill
+    .filter((p) => p.projectedTotal > 0)
     .slice(0, 20)
     .every(
       (p) =>

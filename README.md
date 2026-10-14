@@ -1014,4 +1014,52 @@ The normalized fantasy player contract distinguishes projections from actuals:
 Use `forceRefresh=true` only for an explicit user refresh or debugging; normal UI
 navigation should rely on cached responses.
 
+## NBA Fantasy Tools (Points Leagues)
+
+NBA fantasy lives under `/api/fantasy/nba` and reuses the same VORP, tiering,
+roster-grade, and comparison logic as the NFL tools. Every response includes
+`sport: "nba"`. It reads ESPN's `fba` kona feed through the same reads host.
+
+Supported routes (same request/response shapes as the NFL equivalents):
+
+- `GET /api/fantasy/nba/season`
+- `GET /api/fantasy/nba/draft-board`
+- `GET /api/fantasy/nba/sleepers`
+- `GET /api/fantasy/nba/trades/analyze?sideA=&sideB=`
+- `GET /api/fantasy/nba/compare/head-to-head?rosterA=&rosterB=`
+- `GET /api/fantasy/nba/compare/players?playerAId=&playerBId=`
+- `GET /api/fantasy/nba/team-grade?roster=`
+
+### NBA-specific inputs
+
+- `scoringId`: only `2` (ESPN default points scoring) is supported and is the
+  default. ESPN's ids `1` and `3` are category formats with no points total, so the
+  API returns HTTP 400 for them. Category leagues are not supported.
+- `position`: `PG`, `SG`, `SF`, `PF`, `C`, plus lineup slots `G` (PG/SG), `F`
+  (SF/PF), and `UTIL` (any position).
+- `starters`: slot counts such as `PG:1,SG:1,SF:1,PF:1,C:1,G:1,F:1,UTIL:3`. These
+  are the defaults (a standard ESPN points lineup of 10 starters).
+- `teamCount`, `rosterSoFar`, `season`, and `forceRefresh` behave as in the NFL tools.
+
+### How NBA differs from NFL
+
+- Replacement baselines are slot-based: fixed positions fill first, then `G`, `F`,
+  and `UTIL` in that order, each taking whichever eligible position's next
+  replacement candidate projects highest.
+- Roster lineups fill the same way, so `suggestedStarters` and `starters` carry a
+  `lineupSlot` (for example `UTIL`) and `missingStarterSlots` is reported per slot.
+- VORP is in the thousands (a full season of points), so the trade `verdict`
+  cutoffs are scaled for the NBA: `balanced` up to 40, `slight_edge` up to 170.
+- Players ESPN has not projected arrive with a points total of `0`; the API treats
+  those as having no projection (`projectedTotal: null`), not as a score of zero.
+- ADP is treated as a placeholder at `131` and above (the NFL uses `169.5`).
+- `keyStats.projected` holds season totals plus `games` and a `perGame` object
+  (points, rebounds, assists, steals, blocks, turnovers, threePointersMade, minutes).
+
+### Not yet available for NBA
+
+Waivers, consistency, and start/sit are NFL-only. NBA fantasy game data is
+per-game (daily scoring periods) rather than weekly, so those tools need a
+separate design.
+
 Default port is `5000`.

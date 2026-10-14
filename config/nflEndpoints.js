@@ -6,8 +6,9 @@ const COMMON_V3_BASE = `https://site.web.api.espn.com/apis/common/v3/sports/${SP
 const CORE_V2_BASE = `https://sports.core.api.espn.com/v2/sports/${SPORT}/leagues/${LEAGUE}`;
 
 // Reads host only. fantasy.espn.com 302s every /apis/v3 request to the marketing site.
-const FANTASY_READS_BASE =
-  "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl";
+const FANTASY_READS_HOST =
+  "https://lm-api-reads.fantasy.espn.com/apis/v3/games";
+const fantasyBase = (gameKey = "ffl") => `${FANTASY_READS_HOST}/${gameKey}`;
 
 const SCORING_IDS = {
   STANDARD: 1,
@@ -32,9 +33,9 @@ const endpoints = {
 
   // kona_player_info is only honoured on the leaguedefaults route, which evaluates
   // projections against a public scoring profile. /seasons/{year}/players ignores it.
-  fantasyPlayers: (season, scoringId) =>
-    `${FANTASY_READS_BASE}/seasons/${season}/segments/0/leaguedefaults/${scoringId}`,
-  fantasyGame: () => FANTASY_READS_BASE,
+  fantasyPlayers: (season, scoringId, gameKey = "ffl") =>
+    `${fantasyBase(gameKey)}/seasons/${season}/segments/0/leaguedefaults/${scoringId}`,
+  fantasyGame: (gameKey = "ffl") => fantasyBase(gameKey),
 };
 
 module.exports = {

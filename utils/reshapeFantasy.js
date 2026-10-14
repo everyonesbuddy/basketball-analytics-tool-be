@@ -1,3 +1,5 @@
+const { NFL } = require("../config/fantasySports");
+
 // The shared usageValue.toNumber coerces null to 0 (Number(null) === 0), which would
 // turn "no projection" into a real 0. Fantasy paths need absent to stay absent.
 function finiteNumber(value) {
@@ -18,63 +20,29 @@ function roundNullable(value, decimals = 2) {
   return Number(parsed.toFixed(decimals));
 }
 
-const POSITION_BY_ID = {
-  1: "QB",
-  2: "RB",
-  3: "WR",
-  4: "TE",
-  5: "K",
-  16: "DST",
-};
+const POSITION_BY_ID = NFL.positionById;
 
-const FLEX_POSITIONS = new Set(["RB", "WR", "TE"]);
+const FLEX_POSITIONS = new Set(NFL.flexSlots.FLEX);
 
 // ESPN keys stats[].stats by numeric stat id, and the id ranges are disjoint by
 // position group (verified: QB 0-40, skill 23-119, K 74-88/198-216, D/ST 89-137).
-const STAT_IDS = {
-  passing: {
-    passAttempts: 0,
-    completions: 1,
-    incompletions: 2,
-    passingYards: 3,
-    passingTouchdowns: 4,
-    interceptions: 20,
-  },
-  rushing: {
-    rushAttempts: 23,
-    rushingYards: 24,
-    rushingTouchdowns: 25,
-  },
-  receiving: {
-    receptions: 53,
-    receivingYards: 42,
-    receivingTouchdowns: 43,
-    targets: 58,
-  },
-};
+const STAT_IDS = NFL.statIds;
 
-const GAMES_PLAYED_STAT_ID = 210;
+const GAMES_PLAYED_STAT_ID = NFL.gamesPlayedStatId;
 
-const STAT_GROUPS_BY_POSITION = {
-  QB: ["passing", "rushing"],
-  RB: ["rushing", "receiving"],
-  WR: ["receiving", "rushing"],
-  TE: ["receiving"],
-  K: [],
-  DST: [],
-};
+const STAT_GROUPS_BY_POSITION = NFL.statGroupsByPosition;
 
 // ESPN caps ADP at ~170 for players outside the draftable pool, with small jitter.
 // Anything in this band carries no usable draft signal.
-const ADP_PLACEHOLDER_FLOOR = 169.5;
+const ADP_PLACEHOLDER_FLOOR = NFL.adpPlaceholderFloor;
 
-function resolvePosition(defaultPositionId) {
-  return POSITION_BY_ID[Number(defaultPositionId)] || null;
+function resolvePosition(defaultPositionId, sport = NFL) {
+  return sport.positionById[Number(defaultPositionId)] || null;
 }
 
-function isPlaceholderAdp(value) {
+function isPlaceholderAdp(value, sport = NFL) {
   const adp = finiteNumber(value);
-  return adp === null || adp <= 0 || adp >= ADP_PLACEHOLDER_FLOOR;
+  return adp === null || adp <= 0 || adp >= sport.adpPlaceholderFloor;
 }
 
 function findStatEntry(
@@ -95,8 +63,8 @@ function findStatEntry(
   );
 }
 
-function extractKeyStats(position, statMap = {}) {
-  const groups = STAT_GROUPS_BY_POSITION[position];
+function extractKeyStats(position, statMap = {}, sport = NFL) {
+  const groups = sport.statGroupsByPosition[position];
 
   // K and D/ST use a wholly separate id range that is not mapped yet; exposing a
   // skill-position shape for them would be wrong, so callers get rawStats only.
@@ -111,7 +79,7 @@ function extractKeyStats(position, statMap = {}) {
   const keyStats = {};
 
   for (const group of groups) {
-    const dictionary = STAT_IDS[group];
+    const dictionary = sport.statIds[group];
     if (!dictionary) {
       continue;
     }
@@ -121,10 +89,23 @@ function extractKeyStats(position, statMap = {}) {
     }
   }
 
+  // NBA stat maps are season totals; per-game averages are what users actually read.
+  if (sport.perGameStats) {
+    const games = finiteNumber(statMap?.[sport.gamesPlayedStatId]);
+    keyStats.games = games;
+    keyStats.perGame = {};
+    for (const label of sport.perGameStats) {
+      keyStats.perGame[label] =
+        games > 0 && finiteNumber(keyStats[label]) !== null
+          ? roundNullable(keyStats[label] / games, 1)
+          : null;
+    }
+  }
+
   return keyStats;
 }
 
-function normalizeWeeklySplits(stats = [], seasonId) {
+function normalizeWeeklySplits(stats = [], seasonId, sport = NFL) {
   if (!Array.isArray(stats)) {
     return [];
   }
@@ -132,7 +113,7 @@ function normalizeWeeklySplits(stats = [], seasonId) {
   return stats
     .filter(
       (entry) =>
-        Number(entry?.statSplitTypeId) === 1 &&
+        Number(entry?.statSplitTypeId) === sport.gameSplitTypeId &&
         (seasonId === undefined || Number(entry?.seasonId) === seasonId),
     )
     .map((entry) => ({
@@ -145,7 +126,7 @@ function normalizeWeeklySplits(stats = [], seasonId) {
 }
 
 function normalizePlayer(rawEntry = {}, options = {}) {
-  const { seasonId, teamsById = null } = options;
+  const { seasonId, teamsById = null, sport = NFL } = options;
   const player = rawEntry?.player || {};
   const id = finiteNumber(player?.id ?? rawEntry?.id);
 
@@ -153,7 +134,8 @@ function normalizePlayer(rawEntry = {}, options = {}) {
     return null;
   }
 
-  const position = resolvePosition(player?.defaultPositionId);
+  const position = resolvePosition(player?.defaultPositionId, sport);
+  const flexPositions = new Set(Object.values(sport.flexSlots).flat());
   const ownership = player?.ownership || {};
   const stats = Array.isArray(player?.stats) ? player.stats : [];
 
@@ -175,11 +157,17 @@ function normalizePlayer(rawEntry = {}, options = {}) {
   const actualStatMap = actual?.stats || {};
   const hasActualProduction = Object.keys(actualStatMap).length > 0;
 
+  // NBA ESPN sends appliedTotal 0 for unprojected players; that means "no projection", not zero points.
+  const rawProjectedTotal = finiteNumber(projection?.appliedTotal);
+  const hasProjectionValue =
+    rawProjectedTotal !== null &&
+    (!sport.requirePositiveProjection || rawProjectedTotal > 0);
+
   return {
     id,
     name: player?.fullName || null,
     position,
-    isFlexEligible: FLEX_POSITIONS.has(position),
+    isFlexEligible: flexPositions.has(position),
     team: {
       proTeamId,
       abbreviation: team?.abbreviation || null,
@@ -188,13 +176,19 @@ function normalizePlayer(rawEntry = {}, options = {}) {
     injuryStatus: player?.injuryStatus || null,
     isInjured: Boolean(player?.injured),
     adp: roundNullable(adp, 2),
-    adpIsPlaceholder: isPlaceholderAdp(adp),
+    adpIsPlaceholder: isPlaceholderAdp(adp, sport),
     ownershipPct: roundNullable(ownership?.percentOwned, 2),
     startedPct: roundNullable(ownership?.percentStarted, 2),
     auctionValue: roundNullable(ownership?.auctionValueAverage, 2),
-    projectedTotal: roundNullable(projection?.appliedTotal, 2),
-    projectedAverage: roundNullable(projection?.appliedAverage, 2),
-    projectedGames: finiteNumber(projection?.stats?.[GAMES_PLAYED_STAT_ID]),
+    projectedTotal: hasProjectionValue
+      ? roundNullable(projection?.appliedTotal, 2)
+      : null,
+    projectedAverage: hasProjectionValue
+      ? roundNullable(projection?.appliedAverage, 2)
+      : null,
+    projectedGames: finiteNumber(
+      projection?.stats?.[sport.gamesPlayedStatId],
+    ),
     // Before kickoff ESPN sends an actuals row of 0; that is "not played yet", not a score.
     actualTotal: hasActualProduction
       ? roundNullable(actual?.appliedTotal, 2)
@@ -203,7 +197,7 @@ function normalizePlayer(rawEntry = {}, options = {}) {
       ? roundNullable(actual?.appliedAverage, 2)
       : null,
     actualGames: hasActualProduction
-      ? finiteNumber(actualStatMap?.[GAMES_PLAYED_STAT_ID])
+      ? finiteNumber(actualStatMap?.[sport.gamesPlayedStatId])
       : null,
     draftRank: {
       ppr: finiteNumber(player?.draftRanksByRankType?.PPR?.rank),
@@ -213,14 +207,16 @@ function normalizePlayer(rawEntry = {}, options = {}) {
       rawEntry?.ratings?.["0"]?.positionalRanking,
     ),
     keyStats: {
-      projected: extractKeyStats(position, projection?.stats || {}),
-      actual: extractKeyStats(position, actualStatMap),
+      projected: hasProjectionValue
+        ? extractKeyStats(position, projection?.stats || {}, sport)
+        : null,
+      actual: extractKeyStats(position, actualStatMap, sport),
     },
     rawStats: {
       projected: projection?.stats || {},
       actual: actualStatMap,
     },
-    weeklySplits: normalizeWeeklySplits(stats, seasonId),
+    weeklySplits: normalizeWeeklySplits(stats, seasonId, sport),
   };
 }
 

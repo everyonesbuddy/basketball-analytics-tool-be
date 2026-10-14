@@ -15,6 +15,11 @@ const {
 
 const router = express.Router();
 
+router.use((req, _res, next) => {
+  req.fantasySport = "nfl";
+  next();
+});
+
 router.get("/season", asyncHandler(getSeasonStateController));
 router.get("/draft-board", asyncHandler(getDraftBoardController));
 router.get("/sleepers", asyncHandler(getSleepersController));

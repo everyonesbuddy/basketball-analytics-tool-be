@@ -2,6 +2,7 @@ const express = require("express");
 const playersRoutes = require("./players.routes");
 const teamsRoutes = require("./teams.routes");
 const fantasyRoutes = require("./fantasy.routes");
+const nbaFantasyRoutes = require("./nbaFantasy.routes");
 
 const router = express.Router();
 
@@ -15,6 +16,7 @@ router.get("/health", (req, res) => {
 
 router.use("/players", playersRoutes);
 router.use("/teams", teamsRoutes);
+router.use("/fantasy/nba", nbaFantasyRoutes);
 router.use("/fantasy", fantasyRoutes);
 
 module.exports = router;

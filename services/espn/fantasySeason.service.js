@@ -1,12 +1,14 @@
 const cache = require("../../cache/memoryCache");
 const { endpoints } = require("../../config/nflEndpoints");
+const { getSport } = require("../../config/fantasySports");
 const { getJson } = require("./espnClient");
 
 const FANTASY_SEASON_STATE_TTL_MS = 15 * 60 * 1000;
 
 async function getFantasySeasonState(options = {}) {
-  const { forceRefresh = false } = options;
-  const cacheKey = "fantasy-season-state";
+  const { forceRefresh = false, sport: sportKey = "nfl" } = options;
+  const sport = getSport(sportKey);
+  const cacheKey = `${sport.cachePrefix}-season-state`;
 
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
@@ -15,7 +17,7 @@ async function getFantasySeasonState(options = {}) {
     }
   }
 
-  const url = endpoints.fantasyGame();
+  const url = endpoints.fantasyGame(sport.gameKey);
   const payload = await getJson(url);
   const season = payload?.currentSeason;
   const seasonId = Number(season?.id);

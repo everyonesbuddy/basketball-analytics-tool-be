@@ -4,13 +4,20 @@ const { getPlayerPool } = require("./draftAssistant");
 const {
   attachVorp,
   normalizeLeagueSettings,
-  POSITIONS,
 } = require("../analytics/fantasyVorp");
+const { getSport } = require("../../config/fantasySports");
 const { finiteNumber, roundNullable } = require("../../utils/reshapeFantasy");
 
 const FANTASY_COMPARE_TTL_MS = 5 * 60 * 1000;
 const FANTASY_TEAM_GRADE_TTL_MS = 5 * 60 * 1000;
-const FLEX_POSITIONS = new Set(["RB", "WR", "TE"]);
+
+function hashKey(value) {
+  return crypto
+    .createHash("sha1")
+    .update(JSON.stringify(value))
+    .digest("hex")
+    .slice(0, 16);
+}
 
 function compactPlayer(player = {}) {
   return {
@@ -64,24 +71,30 @@ async function compareFantasyPlayers(options = {}) {
     season,
     leagueSettings = {},
     forceRefresh = false,
+    sport: sportKey = "nfl",
   } = options;
-  const league = normalizeLeagueSettings(leagueSettings);
-  const key = JSON.stringify({
+  const sport = getSport(sportKey);
+  const league = normalizeLeagueSettings(leagueSettings, sport);
+  const cacheKey = `${sport.cachePrefix}-player-compare:${hashKey({
     playerAId,
     playerBId,
     scoringId,
     season,
     league,
-  });
-  const cacheKey = `fantasy-player-compare:${crypto.createHash("sha1").update(key).digest("hex").slice(0, 16)}`;
+  })}`;
 
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
     if (cached) return { ...cached, _cache: "HIT" };
   }
 
-  const pool = await getPlayerPool({ season, scoringId, forceRefresh });
-  const { players } = attachVorp(pool.players, league);
+  const pool = await getPlayerPool({
+    season,
+    scoringId,
+    forceRefresh,
+    sport: sport.key,
+  });
+  const { players } = attachVorp(pool.players, league, sport);
   const byId = new Map(players.map((player) => [player.id, player]));
   const playerA = byId.get(Number(playerAId));
   const playerB = byId.get(Number(playerBId));
@@ -114,6 +127,7 @@ async function compareFantasyPlayers(options = {}) {
   const vorpDifference =
     finiteNumber(playerA.vorp) - finiteNumber(playerB.vorp);
   const payload = {
+    sport: sport.key,
     season: pool.season,
     scoringId,
     scoring: pool.scoring,
@@ -140,34 +154,42 @@ function sortedByVorp(players = []) {
   );
 }
 
-function selectStarters(players = [], league) {
+// Fixed positions fill first, then flex slots in declared order (most restrictive first).
+function selectLineup(players = [], league, sport) {
   const remaining = [...players];
-  const starters = [];
+  const lineup = [];
 
-  for (const position of POSITIONS) {
-    const required = league.starters[position];
+  const take = (slot, eligiblePositions, count) => {
     const eligible = sortedByVorp(
-      remaining.filter((player) => player.position === position),
-    );
-    const selected = eligible.slice(0, required);
-    starters.push(...selected);
-    const selectedIds = new Set(selected.map((player) => player.id));
+      remaining.filter((player) => eligiblePositions.includes(player.position)),
+    ).slice(0, count);
+    const takenIds = new Set(eligible.map((player) => player.id));
     for (let index = remaining.length - 1; index >= 0; index -= 1) {
-      if (selectedIds.has(remaining[index].id)) remaining.splice(index, 1);
+      if (takenIds.has(remaining[index].id)) remaining.splice(index, 1);
     }
+    lineup.push(...eligible.map((player) => ({ player, slot })));
+  };
+
+  for (const position of sport.positions) {
+    take(position, [position], league.starters[position] || 0);
   }
 
-  const flexCount = league.starters.FLEX;
-  const flexPlayers = sortedByVorp(
-    remaining.filter((player) => FLEX_POSITIONS.has(player.position)),
-  ).slice(0, flexCount);
-  starters.push(...flexPlayers);
+  for (const [slot, eligiblePositions] of Object.entries(sport.flexSlots)) {
+    take(slot, eligiblePositions, league.starters[slot] || 0);
+  }
 
-  return starters;
+  return lineup;
 }
 
-function idealStarters(players, league) {
-  return selectStarters(players, league);
+function selectStarters(players, league, sport) {
+  return selectLineup(players, league, sport).map(({ player }) => player);
+}
+
+function requiredStarterCount(league, sport) {
+  return [...sport.positions, ...Object.keys(sport.flexSlots)].reduce(
+    (sum, slot) => sum + (league.starters[slot] || 0),
+    0,
+  );
 }
 
 function scoreToGrade(score) {
@@ -190,7 +212,7 @@ function buildAdpPositionRanks(players = []) {
     groups.get(player.position).push(player);
   }
 
-  for (const [position, group] of groups) {
+  for (const [, group] of groups) {
     group
       .sort((a, b) => finiteNumber(a.adp) - finiteNumber(b.adp))
       .forEach((player, index) => ranks.set(player.id, index + 1));
@@ -282,16 +304,15 @@ function calculateLeagueRelativeValueScore(
     : null;
 }
 
-function summarizeRoster(rosterPlayers, starters, league) {
+function summarizeRoster(rosterPlayers, lineup, league, sport) {
+  const starters = lineup.map(({ player }) => player);
   const starterVorp = starters.reduce(
     (sum, player) => sum + (finiteNumber(player.vorp) || 0),
     0,
   );
-  const requiredStarterCount =
-    POSITIONS.reduce((sum, position) => sum + league.starters[position], 0) +
-    league.starters.FLEX;
-  const coverageScore = requiredStarterCount
-    ? Math.min(100, (starters.length / requiredStarterCount) * 100)
+  const required = requiredStarterCount(league, sport);
+  const coverageScore = required
+    ? Math.min(100, (starters.length / required) * 100)
     : null;
   const byPosition = starters.reduce((result, player) => {
     result[player.position] = roundNullable(
@@ -307,7 +328,10 @@ function summarizeRoster(rosterPlayers, starters, league) {
     starterVorp: roundNullable(starterVorp, 2),
     coverageScore: roundNullable(coverageScore, 1),
     byPosition,
-    starters: starters.map(compactPlayer),
+    starters: lineup.map(({ player, slot }) => ({
+      ...compactPlayer(player),
+      lineupSlot: slot,
+    })),
     players: rosterPlayers.map(compactPlayer),
   };
 }
@@ -320,20 +344,32 @@ async function compareFantasyTeams(options = {}) {
     season,
     leagueSettings = {},
     forceRefresh = false,
+    sport: sportKey = "nfl",
   } = options;
-  const league = normalizeLeagueSettings(leagueSettings);
+  const sport = getSport(sportKey);
+  const league = normalizeLeagueSettings(leagueSettings, sport);
   const rosterA = [...new Set(rosterAIds.map(Number))].sort((a, b) => a - b);
   const rosterB = [...new Set(rosterBIds.map(Number))].sort((a, b) => a - b);
-  const key = JSON.stringify({ rosterA, rosterB, scoringId, season, league });
-  const cacheKey = `fantasy-team-compare:${crypto.createHash("sha1").update(key).digest("hex").slice(0, 16)}`;
+  const cacheKey = `${sport.cachePrefix}-team-compare:${hashKey({
+    rosterA,
+    rosterB,
+    scoringId,
+    season,
+    league,
+  })}`;
 
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
     if (cached) return { ...cached, _cache: "HIT" };
   }
 
-  const pool = await getPlayerPool({ season, scoringId, forceRefresh });
-  const { players } = attachVorp(pool.players, league);
+  const pool = await getPlayerPool({
+    season,
+    scoringId,
+    forceRefresh,
+    sport: sport.key,
+  });
+  const { players } = attachVorp(pool.players, league, sport);
   const byId = new Map(players.map((player) => [player.id, player]));
   const resolveRoster = (ids) => ({
     players: ids.map((id) => byId.get(id)).filter(Boolean),
@@ -341,14 +377,23 @@ async function compareFantasyTeams(options = {}) {
   });
   const resolvedA = resolveRoster(rosterA);
   const resolvedB = resolveRoster(rosterB);
-  const startersA = selectStarters(resolvedA.players, league);
-  const startersB = selectStarters(resolvedB.players, league);
-  const summaryA = summarizeRoster(resolvedA.players, startersA, league);
-  const summaryB = summarizeRoster(resolvedB.players, startersB, league);
+  const summaryA = summarizeRoster(
+    resolvedA.players,
+    selectLineup(resolvedA.players, league, sport),
+    league,
+    sport,
+  );
+  const summaryB = summarizeRoster(
+    resolvedB.players,
+    selectLineup(resolvedB.players, league, sport),
+    league,
+    sport,
+  );
   const vorpDifference = summaryA.starterVorp - summaryB.starterVorp;
   const coverageDifference = summaryA.coverageScore - summaryB.coverageScore;
 
   const payload = {
+    sport: sport.key,
     season: pool.season,
     scoringId,
     scoring: pool.scoring,
@@ -383,24 +428,36 @@ async function getFantasyTeamGrade(options = {}) {
     season,
     leagueSettings = {},
     forceRefresh = false,
+    sport: sportKey = "nfl",
   } = options;
-  const league = normalizeLeagueSettings(leagueSettings);
+  const sport = getSport(sportKey);
+  const league = normalizeLeagueSettings(leagueSettings, sport);
   const roster = [...new Set(rosterIds.map(Number))].sort((a, b) => a - b);
-  const key = JSON.stringify({ roster, scoringId, season, league });
-  const cacheKey = `fantasy-team-grade:v2:${crypto.createHash("sha1").update(key).digest("hex").slice(0, 16)}`;
+  const cacheKey = `${sport.cachePrefix}-team-grade:v2:${hashKey({
+    roster,
+    scoringId,
+    season,
+    league,
+  })}`;
 
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
     if (cached) return { ...cached, _cache: "HIT" };
   }
 
-  const pool = await getPlayerPool({ season, scoringId, forceRefresh });
-  const { players, baselines } = attachVorp(pool.players, league);
+  const pool = await getPlayerPool({
+    season,
+    scoringId,
+    forceRefresh,
+    sport: sport.key,
+  });
+  const { players, baselines } = attachVorp(pool.players, league, sport);
   const byId = new Map(players.map((player) => [player.id, player]));
   const rosterPlayers = roster.map((id) => byId.get(id)).filter(Boolean);
   const missingPlayerIds = roster.filter((id) => !byId.has(id));
-  const starters = selectStarters(rosterPlayers, league);
-  const ideal = idealStarters(players, league);
+  const lineup = selectLineup(rosterPlayers, league, sport);
+  const starters = lineup.map(({ player }) => player);
+  const ideal = selectStarters(players, league, sport);
   const starterVorp = starters.reduce(
     (sum, player) => sum + (finiteNumber(player.vorp) || 0),
     0,
@@ -419,11 +476,9 @@ async function getFantasyTeamGrade(options = {}) {
     buildAdpPositionRanks(players),
     baselines,
   );
-  const requiredStarterCount =
-    POSITIONS.reduce((sum, position) => sum + league.starters[position], 0) +
-    league.starters.FLEX;
-  const coverageScore = requiredStarterCount
-    ? Math.min(100, (starters.length / requiredStarterCount) * 100)
+  const required = requiredStarterCount(league, sport);
+  const coverageScore = required
+    ? Math.min(100, (starters.length / required) * 100)
     : null;
   const scoreWeights =
     market.score === null
@@ -439,22 +494,23 @@ async function getFantasyTeamGrade(options = {}) {
     result[player.position] = (result[player.position] || 0) + 1;
     return result;
   }, {});
+
+  const filledBySlot = lineup.reduce((result, { slot }) => {
+    result[slot] = (result[slot] || 0) + 1;
+    return result;
+  }, {});
   const missingSlots = {};
-  for (const position of POSITIONS) {
-    const required = league.starters[position];
-    const available = counts[position] || 0;
-    if (available < required) missingSlots[position] = required - available;
+  for (const slot of [
+    ...sport.positions,
+    ...Object.keys(sport.flexSlots),
+  ]) {
+    const shortfall = (league.starters[slot] || 0) - (filledBySlot[slot] || 0);
+    if (shortfall > 0) missingSlots[slot] = shortfall;
   }
 
-  const flexAvailable = rosterPlayers.filter((player) =>
-    FLEX_POSITIONS.has(player.position),
-  ).length;
-  const flexRequired = league.starters.FLEX;
-  if (flexAvailable < flexRequired) {
-    missingSlots.FLEX = flexRequired - flexAvailable;
-  }
-
+  const starterIds = new Set(starters.map((player) => player.id));
   const payload = {
+    sport: sport.key,
     season: pool.season,
     scoringId,
     scoring: pool.scoring,
@@ -474,9 +530,12 @@ async function getFantasyTeamGrade(options = {}) {
     replacementBaselines: baselines,
     roster: rosterPlayers.map((player) => ({
       ...compactPlayer(player),
-      isStarter: starters.some((starter) => starter.id === player.id),
+      isStarter: starterIds.has(player.id),
     })),
-    suggestedStarters: starters.map(compactPlayer),
+    suggestedStarters: lineup.map(({ player, slot }) => ({
+      ...compactPlayer(player),
+      lineupSlot: slot,
+    })),
     positionCounts: counts,
     missingStarterSlots: missingSlots,
     decisionInsights: missingPlayerIds.length

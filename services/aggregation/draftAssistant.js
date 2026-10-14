@@ -6,6 +6,8 @@ const {
   describeScoring,
 } = require("../espn/fantasy.service");
 const { getNflTeamsById } = require("../espn/nfl/teams.service");
+const { getAllTeams } = require("../espn/teams.service");
+const { getSport } = require("../../config/fantasySports");
 const { getFantasySeasonState } = require("../espn/fantasySeason.service");
 const {
   normalizePlayerList,
@@ -29,26 +31,42 @@ const FANTASY_SLEEPERS_TTL_MS = 10 * 60 * 1000;
 const FANTASY_POOL_LIMIT = 1000;
 const SLEEPER_MIN_PROJECTION = 1;
 
-async function resolveSeason(season, forceRefresh = false) {
+async function resolveSeason(season, forceRefresh = false, sport = "nfl") {
   const parsed = finiteNumber(season);
   if (Number.isInteger(parsed) && parsed > 2000) {
     return parsed;
   }
 
-  const state = await getFantasySeasonState({ forceRefresh });
+  const state = await getFantasySeasonState({ forceRefresh, sport });
   return state.season;
 }
 
-function buildPoolCacheKey(season, scoringId) {
-  return `fantasy-players:${season}:${scoringId}`;
+async function getTeamsIndex(sport, forceRefresh) {
+  if (sport.key === "nfl") {
+    return getNflTeamsById({ forceRefresh });
+  }
+
+  // ESPN's fantasy proTeamId matches the NBA site-API team id.
+  const { teams } = await getAllTeams({ forceRefresh });
+  return new Map(teams.map((team) => [Number(team.id), team]));
 }
 
-function buildDraftBoardCacheKey(position, scoringId, rosterHash, leagueHash) {
-  return `fantasy-draft-board:${position || "any"}:${scoringId}:${rosterHash}:${leagueHash}`;
+function buildPoolCacheKey(sport, season, scoringId) {
+  return `${sport.cachePrefix}-players:${season}:${scoringId}`;
 }
 
-function buildSleepersCacheKey(scoringId) {
-  return `fantasy-sleepers:${scoringId}`;
+function buildDraftBoardCacheKey(
+  sport,
+  position,
+  scoringId,
+  rosterHash,
+  leagueHash,
+) {
+  return `${sport.cachePrefix}-draft-board:${position || "any"}:${scoringId}:${rosterHash}:${leagueHash}`;
+}
+
+function buildSleepersCacheKey(sport, scoringId) {
+  return `${sport.cachePrefix}-sleepers:${scoringId}`;
 }
 
 function hashRoster(rosterSoFar = []) {
@@ -68,9 +86,15 @@ function hashRoster(rosterSoFar = []) {
 }
 
 async function getPlayerPool(options = {}) {
-  const { season, scoringId, forceRefresh = false } = options;
-  const resolvedSeason = await resolveSeason(season, forceRefresh);
-  const cacheKey = buildPoolCacheKey(resolvedSeason, scoringId);
+  const {
+    season,
+    scoringId,
+    forceRefresh = false,
+    sport: sportKey = "nfl",
+  } = options;
+  const sport = getSport(sportKey);
+  const resolvedSeason = await resolveSeason(season, forceRefresh, sport.key);
+  const cacheKey = buildPoolCacheKey(sport, resolvedSeason, scoringId);
 
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
@@ -79,12 +103,20 @@ async function getPlayerPool(options = {}) {
     }
   }
 
-  const filter = buildPlayerFilter({ limit: FANTASY_POOL_LIMIT });
-  const payload = await fetchFantasyPlayers(resolvedSeason, scoringId, filter);
+  const filter = buildPlayerFilter({
+    limit: FANTASY_POOL_LIMIT,
+    sortValue: sport.sortValue,
+  });
+  const payload = await fetchFantasyPlayers(
+    resolvedSeason,
+    scoringId,
+    filter,
+    sport.key,
+  );
 
   let teamsById = null;
   try {
-    teamsById = await getNflTeamsById({ forceRefresh });
+    teamsById = await getTeamsIndex(sport, forceRefresh);
   } catch (_error) {
     // Team enrichment is cosmetic; the pool is still usable without it.
     teamsById = null;
@@ -93,14 +125,16 @@ async function getPlayerPool(options = {}) {
   const players = normalizePlayerList(payload.players, {
     seasonId: resolvedSeason,
     teamsById,
+    sport,
   });
 
   const withAdp = players.filter((player) => !player.adpIsPlaceholder).length;
 
   const result = {
+    sport: sport.key,
     season: resolvedSeason,
     scoringId,
-    scoring: describeScoring(scoringId),
+    scoring: describeScoring(scoringId, sport.key),
     count: players.length,
     playersWithUsableAdp: withAdp,
     playersWithProjection: players.filter(hasProjection).length,
@@ -113,13 +147,14 @@ async function getPlayerPool(options = {}) {
   return { ...result, _cache: "MISS" };
 }
 
-function matchesPosition(player, position) {
+function matchesPosition(player, position, sport) {
   if (!position) {
     return true;
   }
 
-  if (position === "FLEX") {
-    return FLEX_POSITIONS.has(player.position);
+  const flexEligible = sport.flexSlots[position];
+  if (flexEligible) {
+    return flexEligible.includes(player.position);
   }
 
   return player.position === position;
@@ -166,16 +201,19 @@ async function getDraftBoard(options = {}) {
     scoringId,
     season,
     forceRefresh = false,
+    sport: sportKey = "nfl",
   } = options;
 
+  const sport = getSport(sportKey);
   const rosterHash = hashRoster(rosterSoFar);
-  const league = normalizeLeagueSettings(leagueSettings);
+  const league = normalizeLeagueSettings(leagueSettings, sport);
   const leagueHash = crypto
     .createHash("sha1")
     .update(JSON.stringify(league))
     .digest("hex")
     .slice(0, 12);
   const cacheKey = buildDraftBoardCacheKey(
+    sport,
     position,
     scoringId,
     rosterHash,
@@ -189,19 +227,29 @@ async function getDraftBoard(options = {}) {
     }
   }
 
-  const pool = await getPlayerPool({ season, scoringId, forceRefresh });
+  const pool = await getPlayerPool({
+    season,
+    scoringId,
+    forceRefresh,
+    sport: sport.key,
+  });
 
   const draftedIds = new Set(
     rosterSoFar.map((id) => Number(id)).filter((id) => Number.isFinite(id)),
   );
 
   const available = pool.players.filter(
-    (player) => !draftedIds.has(player.id) && matchesPosition(player, position),
+    (player) =>
+      !draftedIds.has(player.id) && matchesPosition(player, position, sport),
   );
 
   // Score and tier against the available pool so both reflect who is actually left.
   const { players: scored } = attachSleeperScores(available);
-  const { players: tiered, tiers, baselines } = attachVorp(scored, league);
+  const {
+    players: tiered,
+    tiers,
+    baselines,
+  } = attachVorp(scored, league, sport);
 
   const candidates = tiered
     .filter(hasProjection)
@@ -240,6 +288,7 @@ async function getDraftBoard(options = {}) {
     }));
 
   const payload = {
+    sport: sport.key,
     season: pool.season,
     scoringId,
     scoring: pool.scoring,
@@ -277,8 +326,15 @@ function buildSleeperInsights(sleepers = [], excludedCount = 0) {
 }
 
 async function getSleepers(options = {}) {
-  const { scoringId, season, forceRefresh = false, limit = 50 } = options;
-  const cacheKey = buildSleepersCacheKey(scoringId);
+  const {
+    scoringId,
+    season,
+    forceRefresh = false,
+    limit = 50,
+    sport: sportKey = "nfl",
+  } = options;
+  const sport = getSport(sportKey);
+  const cacheKey = buildSleepersCacheKey(sport, scoringId);
 
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
@@ -287,7 +343,12 @@ async function getSleepers(options = {}) {
     }
   }
 
-  const pool = await getPlayerPool({ season, scoringId, forceRefresh });
+  const pool = await getPlayerPool({
+    season,
+    scoringId,
+    forceRefresh,
+    sport: sport.key,
+  });
   const { players: scored, distributionByPosition } = attachSleeperScores(
     pool.players,
   );
@@ -322,6 +383,7 @@ async function getSleepers(options = {}) {
   const excludedCount = scored.length - eligible.length;
 
   const payload = {
+    sport: sport.key,
     season: pool.season,
     scoringId,
     scoring: pool.scoring,

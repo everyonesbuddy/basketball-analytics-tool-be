@@ -16,24 +16,32 @@ const {
   compareFantasyTeams,
   getFantasyTeamGrade,
 } = require("../services/aggregation/fantasyTeamTools");
-const { SCORING_IDS } = require("../config/nflEndpoints");
+const { getSport } = require("../config/fantasySports");
 
-const ALLOWED_SCORING_IDS = new Set(Object.values(SCORING_IDS));
-const ALLOWED_POSITIONS = new Set(["QB", "RB", "WR", "TE", "K", "DST", "FLEX"]);
+const sportOf = (req) => getSport(req.fantasySport || "nfl");
+
+function allowedScoringIds(sport) {
+  return new Set(Object.values(sport.scoring.ids));
+}
+
+function allowedSlots(sport) {
+  return new Set([...sport.positions, ...Object.keys(sport.flexSlots)]);
+}
 
 function parseForceRefresh(query) {
   return String(query.forceRefresh || "false").toLowerCase() === "true";
 }
 
-function validateScoringId(value) {
+function validateScoringId(value, sport) {
   if (value === undefined || value === "") {
-    return SCORING_IDS.PPR;
+    return sport.scoring.defaultId;
   }
 
   const scoringId = Number(value);
-  if (!ALLOWED_SCORING_IDS.has(scoringId)) {
+  const allowed = allowedScoringIds(sport);
+  if (!allowed.has(scoringId)) {
     const error = new Error(
-      `scoringId must be one of ${[...ALLOWED_SCORING_IDS].join(", ")}`,
+      `scoringId must be one of ${[...allowed].join(", ")}`,
     );
     error.statusCode = 400;
     throw error;
@@ -42,16 +50,15 @@ function validateScoringId(value) {
   return scoringId;
 }
 
-function validatePosition(value) {
+function validatePosition(value, sport) {
   if (value === undefined || value === "") {
     return null;
   }
 
   const position = String(value).trim().toUpperCase();
-  if (!ALLOWED_POSITIONS.has(position)) {
-    const error = new Error(
-      `position must be one of ${[...ALLOWED_POSITIONS].join(", ")}`,
-    );
+  const allowed = allowedSlots(sport);
+  if (!allowed.has(position)) {
+    const error = new Error(`position must be one of ${[...allowed].join(", ")}`);
     error.statusCode = 400;
     throw error;
   }
@@ -148,11 +155,11 @@ function validateIntegerInRange(value, label, fallback, min, max) {
   return parsed;
 }
 
-function validateLeagueSettings(query = {}) {
+function validateLeagueSettings(query = {}, sport = getSport("nfl")) {
   const teamCount = validateIntegerInRange(
     query.teamCount,
     "teamCount",
-    12,
+    sport.defaultLeague.teamCount,
     2,
     32,
   );
@@ -161,11 +168,15 @@ function validateLeagueSettings(query = {}) {
 
   if (!raw) return { teamCount, starters };
 
+  const allowed = allowedSlots(sport);
   for (const entry of raw.split(",")) {
     const [position, count] = entry.split(":").map((part) => part.trim());
-    if (!ALLOWED_POSITIONS.has(position) || !count) {
+    if (!allowed.has(position) || !count) {
+      const example = Object.entries(sport.defaultLeague.starters)
+        .map(([slot, slotCount]) => `${slot}:${slotCount}`)
+        .join(",");
       const error = new Error(
-        "starters must use QB,RB,WR,TE,FLEX,K,DST counts, e.g. QB:1,RB:2,WR:2,TE:1,FLEX:1",
+        `starters must use ${[...allowed].join(",")} counts, e.g. ${example}`,
       );
       error.statusCode = 400;
       throw error;
@@ -183,11 +194,12 @@ function validateLeagueSettings(query = {}) {
 }
 
 async function getDraftBoardController(req, res) {
-  const scoringId = validateScoringId(req.query.scoringId);
-  const position = validatePosition(req.query.position);
+  const sport = sportOf(req);
+  const scoringId = validateScoringId(req.query.scoringId, sport);
+  const position = validatePosition(req.query.position, sport);
   const season = validateSeason(req.query.season);
   const rosterSoFar = validatePlayerIds(req.query.rosterSoFar, "rosterSoFar");
-  const leagueSettings = validateLeagueSettings(req.query);
+  const leagueSettings = validateLeagueSettings(req.query, sport);
   const forceRefresh = parseForceRefresh(req.query);
 
   const data = await getDraftBoard({
@@ -197,6 +209,7 @@ async function getDraftBoardController(req, res) {
     season,
     leagueSettings,
     forceRefresh,
+    sport: sport.key,
   });
 
   return res.status(200).json({
@@ -208,16 +221,23 @@ async function getDraftBoardController(req, res) {
 async function getSeasonStateController(req, res) {
   const data = await getFantasySeasonState({
     forceRefresh: parseForceRefresh(req.query),
+    sport: sportOf(req).key,
   });
   return res.status(200).json({ success: true, data });
 }
 
 async function getSleepersController(req, res) {
-  const scoringId = validateScoringId(req.query.scoringId);
+  const sport = sportOf(req);
+  const scoringId = validateScoringId(req.query.scoringId, sport);
   const season = validateSeason(req.query.season);
   const forceRefresh = parseForceRefresh(req.query);
 
-  const data = await getSleepers({ scoringId, season, forceRefresh });
+  const data = await getSleepers({
+    scoringId,
+    season,
+    forceRefresh,
+    sport: sport.key,
+  });
 
   return res.status(200).json({
     success: true,
@@ -226,20 +246,22 @@ async function getSleepersController(req, res) {
 }
 
 async function analyzeTradeController(req, res) {
+  const sport = sportOf(req);
   const data = await analyzeTrade({
     sideAIds: validatePlayerIds(req.query.sideA, "sideA", true),
     sideBIds: validatePlayerIds(req.query.sideB, "sideB", true),
-    scoringId: validateScoringId(req.query.scoringId),
+    scoringId: validateScoringId(req.query.scoringId, sport),
     season: validateSeason(req.query.season),
-    leagueSettings: validateLeagueSettings(req.query),
+    leagueSettings: validateLeagueSettings(req.query, sport),
     forceRefresh: parseForceRefresh(req.query),
+    sport: sport.key,
   });
   return res.status(200).json({ success: true, data });
 }
 
 async function getWaiverWireController(req, res) {
   const data = await getWaiverWire({
-    scoringId: validateScoringId(req.query.scoringId),
+    scoringId: validateScoringId(req.query.scoringId, sportOf(req)),
     season: validateSeason(req.query.season),
     ownershipMax: validateIntegerInRange(
       req.query.ownershipMax,
@@ -256,7 +278,7 @@ async function getWaiverWireController(req, res) {
 
 async function getConsistencyController(req, res) {
   const data = await getConsistencyLeaders({
-    scoringId: validateScoringId(req.query.scoringId),
+    scoringId: validateScoringId(req.query.scoringId, sportOf(req)),
     season: validateSeason(req.query.season),
     window: validateIntegerInRange(req.query.window, "window", 4, 3, 10),
     forceRefresh: parseForceRefresh(req.query),
@@ -267,7 +289,7 @@ async function getConsistencyController(req, res) {
 async function getStartSitController(req, res) {
   const data = await getStartSit({
     playerIds: validatePlayerIds(req.query.playerIds, "playerIds", true),
-    scoringId: validateScoringId(req.query.scoringId),
+    scoringId: validateScoringId(req.query.scoringId, sportOf(req)),
     season: validateSeason(req.query.season),
     window: validateIntegerInRange(req.query.window, "window", 4, 2, 10),
     forceRefresh: parseForceRefresh(req.query),
@@ -276,6 +298,7 @@ async function getStartSitController(req, res) {
 }
 
 async function compareFantasyPlayersController(req, res) {
+  const sport = sportOf(req);
   const playerAId = validatePlayerIds(req.query.playerAId, "playerAId", true);
   const playerBId = validatePlayerIds(req.query.playerBId, "playerBId", true);
 
@@ -298,38 +321,43 @@ async function compareFantasyPlayersController(req, res) {
   const data = await compareFantasyPlayers({
     playerAId: playerAId[0],
     playerBId: playerBId[0],
-    scoringId: validateScoringId(req.query.scoringId),
+    scoringId: validateScoringId(req.query.scoringId, sport),
     season: validateSeason(req.query.season),
-    leagueSettings: validateLeagueSettings(req.query),
+    leagueSettings: validateLeagueSettings(req.query, sport),
     forceRefresh: parseForceRefresh(req.query),
+    sport: sport.key,
   });
 
   return res.status(200).json({ success: true, data });
 }
 
 async function compareFantasyTeamsController(req, res) {
+  const sport = sportOf(req);
   const rosterAIds = validatePlayerIds(req.query.rosterA, "rosterA", true);
   const rosterBIds = validatePlayerIds(req.query.rosterB, "rosterB", true);
   const data = await compareFantasyTeams({
     rosterAIds,
     rosterBIds,
-    scoringId: validateScoringId(req.query.scoringId),
+    scoringId: validateScoringId(req.query.scoringId, sport),
     season: validateSeason(req.query.season),
-    leagueSettings: validateLeagueSettings(req.query),
+    leagueSettings: validateLeagueSettings(req.query, sport),
     forceRefresh: parseForceRefresh(req.query),
+    sport: sport.key,
   });
 
   return res.status(200).json({ success: true, data });
 }
 
 async function getFantasyTeamGradeController(req, res) {
+  const sport = sportOf(req);
   const rosterIds = validatePlayerIds(req.query.roster, "roster", true);
   const data = await getFantasyTeamGrade({
     rosterIds,
-    scoringId: validateScoringId(req.query.scoringId),
+    scoringId: validateScoringId(req.query.scoringId, sport),
     season: validateSeason(req.query.season),
-    leagueSettings: validateLeagueSettings(req.query),
+    leagueSettings: validateLeagueSettings(req.query, sport),
     forceRefresh: parseForceRefresh(req.query),
+    sport: sport.key,
   });
 
   return res.status(200).json({ success: true, data });

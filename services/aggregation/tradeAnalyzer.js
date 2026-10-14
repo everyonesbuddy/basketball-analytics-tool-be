@@ -5,6 +5,7 @@ const {
   attachVorp,
   normalizeLeagueSettings,
 } = require("../analytics/fantasyVorp");
+const { getSport } = require("../../config/fantasySports");
 const { finiteNumber, roundNullable } = require("../../utils/reshapeFantasy");
 
 const TRADE_ANALYZER_TTL_MS = 5 * 60 * 1000;
@@ -44,10 +45,11 @@ function summarizeSide(players = []) {
   };
 }
 
-function classifyTrade(netVorp) {
+function classifyTrade(netVorp, sport) {
   const delta = Math.abs(netVorp);
-  if (delta <= 3) return "balanced";
-  if (delta <= 12) return "slight_edge";
+  const { balanced, slightEdge } = sport.tradeVerdictThresholds;
+  if (delta <= balanced) return "balanced";
+  if (delta <= slightEdge) return "slight_edge";
   return "clear_edge";
 }
 
@@ -59,8 +61,10 @@ async function analyzeTrade(options = {}) {
     season,
     leagueSettings = {},
     forceRefresh = false,
+    sport: sportKey = "nfl",
   } = options;
-  const league = normalizeLeagueSettings(leagueSettings);
+  const sport = getSport(sportKey);
+  const league = normalizeLeagueSettings(leagueSettings, sport);
   const keySource = JSON.stringify({
     sideAIds: [...sideAIds].sort(),
     sideBIds: [...sideBIds].sort(),
@@ -68,15 +72,20 @@ async function analyzeTrade(options = {}) {
     season,
     league,
   });
-  const cacheKey = `fantasy-trade:${crypto.createHash("sha1").update(keySource).digest("hex").slice(0, 16)}`;
+  const cacheKey = `${sport.cachePrefix}-trade:${crypto.createHash("sha1").update(keySource).digest("hex").slice(0, 16)}`;
 
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
     if (cached) return { ...cached, _cache: "HIT" };
   }
 
-  const pool = await getPlayerPool({ season, scoringId, forceRefresh });
-  const { players, tiers, baselines } = attachVorp(pool.players, league);
+  const pool = await getPlayerPool({
+    season,
+    scoringId,
+    forceRefresh,
+    sport: sport.key,
+  });
+  const { players, tiers, baselines } = attachVorp(pool.players, league, sport);
   const byId = new Map(players.map((player) => [player.id, player]));
   const sideA = sideAIds.map((id) => byId.get(id)).filter(Boolean);
   const sideB = sideBIds.map((id) => byId.get(id)).filter(Boolean);
@@ -88,6 +97,7 @@ async function analyzeTrade(options = {}) {
   const netVorpToA = roundNullable(summaryB.totalVorp - summaryA.totalVorp, 2);
 
   const result = {
+    sport: sport.key,
     season: pool.season,
     scoringId,
     scoring: pool.scoring,
@@ -98,7 +108,7 @@ async function analyzeTrade(options = {}) {
     sideB: summaryB,
     missingPlayerIds,
     netVorpToA,
-    verdict: classifyTrade(netVorpToA || 0),
+    verdict: classifyTrade(netVorpToA || 0, sport),
     decisionInsights:
       netVorpToA === 0
         ? "Both sides return the same projected value over replacement."

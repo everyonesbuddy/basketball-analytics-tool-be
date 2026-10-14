@@ -1,37 +1,37 @@
 const { finiteNumber, roundNullable } = require("../../utils/reshapeFantasy");
+const { NFL } = require("../../config/fantasySports");
 const { attachTiers } = require("./fantasyValue");
 
-const DEFAULT_LEAGUE_SETTINGS = {
-  teamCount: 12,
-  starters: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DST: 1 },
-};
+const DEFAULT_LEAGUE_SETTINGS = NFL.defaultLeague;
+const POSITIONS = NFL.positions;
 
-const POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"];
-const FLEX_POSITIONS = new Set(["RB", "WR", "TE"]);
+function slotKeys(sport) {
+  return [...sport.positions, ...Object.keys(sport.flexSlots)];
+}
 
-function normalizeLeagueSettings(input = {}) {
+function normalizeLeagueSettings(input = {}, sport = NFL) {
   const teamCount = Number(input?.teamCount);
   const starters = {};
 
-  for (const position of [...POSITIONS, "FLEX"]) {
-    const value = Number(input?.starters?.[position]);
-    starters[position] =
+  for (const slot of slotKeys(sport)) {
+    const value = Number(input?.starters?.[slot]);
+    starters[slot] =
       Number.isInteger(value) && value >= 0
         ? value
-        : DEFAULT_LEAGUE_SETTINGS.starters[position];
+        : sport.defaultLeague.starters[slot];
   }
 
   return {
     teamCount:
       Number.isInteger(teamCount) && teamCount >= 2 && teamCount <= 32
         ? teamCount
-        : DEFAULT_LEAGUE_SETTINGS.teamCount,
+        : sport.defaultLeague.teamCount,
     starters,
   };
 }
 
-function playersByPosition(players = []) {
-  const groups = new Map(POSITIONS.map((position) => [position, []]));
+function playersByPosition(players = [], sport = NFL) {
+  const groups = new Map(sport.positions.map((position) => [position, []]));
 
   for (const player of players) {
     if (
@@ -52,48 +52,50 @@ function playersByPosition(players = []) {
   return groups;
 }
 
-function allocateFlexSlots(groups, replacementRanks, flexSlots) {
-  for (let slot = 0; slot < flexSlots; slot += 1) {
-    let bestPosition = null;
-    let bestProjection = null;
+// Flex slots are filled in declared order (most restrictive first) by whichever eligible
+// position's next-best replacement candidate projects highest.
+function allocateFlexSlots(groups, replacementRanks, league, sport) {
+  for (const [slotName, eligiblePositions] of Object.entries(sport.flexSlots)) {
+    const slotCount = league.teamCount * (league.starters[slotName] || 0);
 
-    for (const position of FLEX_POSITIONS) {
-      const player = groups.get(position)?.[replacementRanks[position]];
-      const projection = finiteNumber(player?.projectedTotal);
-      if (
-        projection !== null &&
-        (bestProjection === null || projection > bestProjection)
-      ) {
-        bestPosition = position;
-        bestProjection = projection;
+    for (let slot = 0; slot < slotCount; slot += 1) {
+      let bestPosition = null;
+      let bestProjection = null;
+
+      for (const position of eligiblePositions) {
+        const player = groups.get(position)?.[replacementRanks[position]];
+        const projection = finiteNumber(player?.projectedTotal);
+        if (
+          projection !== null &&
+          (bestProjection === null || projection > bestProjection)
+        ) {
+          bestPosition = position;
+          bestProjection = projection;
+        }
       }
-    }
 
-    if (!bestPosition) {
-      break;
-    }
+      if (!bestPosition) {
+        break;
+      }
 
-    replacementRanks[bestPosition] += 1;
+      replacementRanks[bestPosition] += 1;
+    }
   }
 }
 
-function buildReplacementBaselines(players = [], settings = {}) {
-  const league = normalizeLeagueSettings(settings);
-  const groups = playersByPosition(players);
+function buildReplacementBaselines(players = [], settings = {}, sport = NFL) {
+  const league = normalizeLeagueSettings(settings, sport);
+  const groups = playersByPosition(players, sport);
   const replacementRanks = {};
 
-  for (const position of POSITIONS) {
+  for (const position of sport.positions) {
     replacementRanks[position] = league.teamCount * league.starters[position];
   }
 
-  allocateFlexSlots(
-    groups,
-    replacementRanks,
-    league.teamCount * league.starters.FLEX,
-  );
+  allocateFlexSlots(groups, replacementRanks, league, sport);
 
   const baselines = {};
-  for (const position of POSITIONS) {
+  for (const position of sport.positions) {
     const playersAtPosition = groups.get(position) || [];
     const replacementPlayer =
       playersAtPosition[replacementRanks[position] - 1] || null;
@@ -108,8 +110,12 @@ function buildReplacementBaselines(players = [], settings = {}) {
   return { league, baselines };
 }
 
-function attachVorp(players = [], settings = {}) {
-  const { league, baselines } = buildReplacementBaselines(players, settings);
+function attachVorp(players = [], settings = {}, sport = NFL) {
+  const { league, baselines } = buildReplacementBaselines(
+    players,
+    settings,
+    sport,
+  );
   const withVorp = players.map((player) => {
     const projectedTotal = finiteNumber(player?.projectedTotal);
     const baseline = baselines[player?.position]?.projectedTotal;
