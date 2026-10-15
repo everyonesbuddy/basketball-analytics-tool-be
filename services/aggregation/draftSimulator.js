@@ -554,7 +554,9 @@ async function getDraftSimulation(options = {}) {
     }),
     assumptions: [
       "Other teams draft by ADP with noise that grows with pick number, capped by position limits.",
-      "Your picks favor the player who most improves your starting lineup; K and D/ST wait for the final rounds.",
+      sport.draft.lateDraftPositions.length
+        ? `Your picks favor the player who most improves your starting lineup; ${sport.draft.lateDraftPositions.join(" and ")} wait for the final rounds.`
+        : "Your picks favor the player who most improves your starting lineup.",
       "Position-first strategies are constraints, so on projected value alone they rarely beat Best value; their worth is showing what a plan costs and what it builds.",
       "Results are projection-based expectations from many simulated drafts, not predictions of a single draft.",
     ],
