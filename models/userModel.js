@@ -14,4 +14,4 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-module.exports = mongoose.models.User || mongoose.model("User", userSchema);
+module.exports = mongoose.models.OsUser || mongoose.model("OsUser", userSchema, "os_users");
