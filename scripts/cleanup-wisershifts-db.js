@@ -67,20 +67,22 @@ async function main() {
     console.log(`    deleted ${r.deletedCount}`);
   }
 
-  // 3. A WiserShifts account the OS script may have changed
-  if (email) {
-    const touched = await users.find({ email, tenantId: { $exists: true }, $or: OS_USER_FIELDS.map((f) => ({ [f]: { $exists: true } })) }).project({ email: 1, name: 1, tenantId: 1 }).toArray();
-    if (!touched.length) console.log(`\n- ${email}: no WiserShifts account was changed by the OS script`);
+  // 3. WiserShifts accounts the OS script changed: they carry fields only the
+  // OS sets (failedLogins, lockedUntil, lastLoginAt, active), whatever the email.
+  {
+    const touched = await users
+      .find({ tenantId: { $exists: true }, $or: OS_USER_FIELDS.map((f) => ({ [f]: { $exists: true } })), ...(email ? { email } : {}) })
+      .project({ email: 1, name: 1, tenantId: 1 })
+      .toArray();
+    if (!touched.length) console.log(`\n- no WiserShifts account was changed by the OS script${email ? ` (checked ${email})` : " (checked every account)"}`);
     for (const u of touched) {
-      console.log(`\n! ${email} (${u.name}) is a WiserShifts account the OS script changed: its password is now the OS one-time password.`);
+      console.log(`\n! ${u.email} (${u.name}) is a WiserShifts account the OS script changed: its password is now the OS one-time password.`);
       console.log("  Reset it in WiserShifts (forgot password), or sign in with that one-time password and change it.");
       if (apply) {
         await users.updateOne({ _id: u._id }, { $unset: Object.fromEntries(OS_USER_FIELDS.map((f) => [f, ""])) });
         console.log("  removed the OS-only fields");
       }
     }
-  } else {
-    console.log('\n(Add --email="you@example.com" with the email you used in create-user.js to check your WiserShifts account too.)');
   }
 
   // 4. Email indexes on users: WiserShifts' own is partial
