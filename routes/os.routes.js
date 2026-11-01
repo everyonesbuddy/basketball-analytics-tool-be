@@ -5,6 +5,7 @@ const { dbReady } = require("../config/db");
 const c = require("../controllers/os.controller");
 const g = require("../controllers/gifting.controller");
 const st = require("../controllers/style.controller");
+const ev = require("../controllers/events.controller");
 
 const router = express.Router();
 
@@ -62,5 +63,17 @@ router.delete("/style/worn/:id", asyncHandler(st.deleteLog));
 router.post("/style/shop", asyncHandler(st.addShop));
 router.patch("/style/shop/:id", asyncHandler(st.updateShop));
 router.delete("/style/shop/:id", asyncHandler(st.deleteShop));
+
+// Events & concerts
+router.get("/events", asyncHandler(ev.overview));
+router.put("/events/settings", asyncHandler(ev.saveSettings));
+router.get("/events/search", asyncHandler(ev.searchAttractions));
+router.post("/events/follows", asyncHandler(ev.follow));
+router.delete("/events/follows/:id", asyncHandler(ev.unfollow));
+router.get("/events/following", asyncHandler(ev.following));
+router.get("/events/nearby", asyncHandler(ev.nearby));
+router.post("/events/saved", asyncHandler(ev.save));
+router.patch("/events/saved/:id", asyncHandler(ev.updateSaved));
+router.delete("/events/saved/:id", asyncHandler(ev.removeSaved));
 
 module.exports = router;
