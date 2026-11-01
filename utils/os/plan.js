@@ -121,7 +121,7 @@ function modeFor(goal, logs = []) {
 function windowStatus(goal, today) {
   const total = daysBetween(goal.windowStart, goal.windowEnd) + 1;
   const left = daysBetween(today, goal.windowEnd);
-  const done = goal.status === "completed" || (goal.obstacle?.kind === "tiered" && (goal.percent || 0) >= 100);
+  const done = goal.status === "completed" || (goal.percent || 0) >= 100;
   let next = null;
   if (done && left > 0) next = { scenario: "early", text: "Done early: expand the scope to fill the window, or pull in a related tiered obstacle." };
   else if (left < 0 && done) next = { scenario: "on-time", text: "Window over and goal done: set the next goal and classify its obstacle." };

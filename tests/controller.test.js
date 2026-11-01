@@ -84,6 +84,10 @@ test("one-tap log: the outcome sets the mode, the block and the next step", asyn
   await c.createLog({ user, body: { goal: gid, outcome: "cleared" } }, res());
   assert.equal(made.mode, "m2single");
   assert.equal(made.cleared, true);
+  assert.equal(g.percent, 100);
+  g.obstacle.kind = "single";
+  await c.createLog({ user, body: { goal: gid, outcome: "progress", percentGained: 3 } }, res());
+  assert.equal(made.mode, "m2tiered");
   const r = res();
   await c.createLog({ user, body: { goal: gid } }, r);
   assert.equal(r.statusCode, 400);

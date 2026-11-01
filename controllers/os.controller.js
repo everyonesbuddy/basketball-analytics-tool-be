@@ -212,7 +212,8 @@ exports.createLog = async (req, res) => {
   // The framework's mode follows from it (stuck = something's missing = Mode 1).
   const outcome = ["progress", "cleared", "blocked"].includes(b.outcome) ? b.outcome : null;
   let mode = ["m1", "m2single", "m2tiered"].includes(b.mode) ? b.mode : null;
-  if (!mode && outcome) mode = outcome === "blocked" ? "m1" : outcome === "cleared" ? "m2single" : goal.obstacle?.kind === "tiered" ? "m2tiered" : "m2single";
+  // Moved it forward with a % earned (or on a goal you chip away at) is Mode 2-Tiered.
+  if (!mode && outcome) mode = outcome === "blocked" ? "m1" : outcome === "cleared" ? "m2single" : Number(b.percentGained) > 0 || goal.obstacle?.kind === "tiered" ? "m2tiered" : "m2single";
   if (!mode) return fail(res, 400, "How did it go?");
   const percentGained = mode === "m2tiered" ? Math.max(0, Math.min(100, Number(b.percentGained) || 0)) : 0;
   const log = await GoalLog.create({
@@ -229,6 +230,8 @@ exports.createLog = async (req, res) => {
     note: str(b.note, 2000),
   });
   if (b.nextStep !== undefined) goal.nextStep = str(b.nextStep, 500);
+  // Cleared the goal entirely for this window: it's done (the window-end choice comes next).
+  if (outcome === "cleared") goal.percent = 100;
   // Keep the goal's state in step with what was logged: the mode is decided
   // block by block, and the goal remembers the latest answers.
   if (percentGained) goal.percent = Math.min(100, Math.round(((goal.percent || 0) + percentGained) * 10) / 10);
