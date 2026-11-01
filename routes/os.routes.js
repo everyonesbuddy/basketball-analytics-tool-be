@@ -4,6 +4,7 @@ const { requireAuth } = require("../middleware/auth");
 const { dbReady } = require("../config/db");
 const c = require("../controllers/os.controller");
 const g = require("../controllers/gifting.controller");
+const st = require("../controllers/style.controller");
 
 const router = express.Router();
 
@@ -48,5 +49,18 @@ router.post("/gifting/link-preview", asyncHandler(g.linkPreview));
 router.post("/gifting/ideas", asyncHandler(g.createIdea));
 router.patch("/gifting/ideas/:id", asyncHandler(g.updateIdea));
 router.delete("/gifting/ideas/:id", asyncHandler(g.deleteIdea));
+
+// Style
+router.get("/style", asyncHandler(st.overview));
+router.post("/style/suggest", asyncHandler(st.suggest));
+router.put("/style/profile", asyncHandler(st.saveProfile));
+router.post("/style/wardrobe", asyncHandler(st.addItem));
+router.patch("/style/wardrobe/:id", asyncHandler(st.updateItem));
+router.delete("/style/wardrobe/:id", asyncHandler(st.deleteItem));
+router.post("/style/worn", asyncHandler(st.logOutfit));
+router.delete("/style/worn/:id", asyncHandler(st.deleteLog));
+router.post("/style/shop", asyncHandler(st.addShop));
+router.patch("/style/shop/:id", asyncHandler(st.updateShop));
+router.delete("/style/shop/:id", asyncHandler(st.deleteShop));
 
 module.exports = router;
