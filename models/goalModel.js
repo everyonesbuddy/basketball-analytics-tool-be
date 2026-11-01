@@ -18,8 +18,9 @@ const goalSchema = new mongoose.Schema(
       bounded: { type: Boolean, default: null }, // tiered only: a finite number of instances
       parallel: { type: Boolean, default: null }, // tiered only: several instances at once
     },
-    toolReady: { type: Boolean, default: false }, // do I have the tool to attack the obstacle?
-    toolNeeded: { type: String, trim: true, maxlength: 500, default: "" }, // the prerequisite sub-goal
+    // Kept in step with the latest session (the mode is decided block by block).
+    toolReady: { type: Boolean, default: null }, // had what was needed last time
+    toolNeeded: { type: String, trim: true, maxlength: 500, default: "" }, // what's missing (Mode 1)
     percent: { type: Number, min: 0, max: 100, default: 0 }, // tiered: accumulated %
     notes: { type: String, trim: true, maxlength: 4000, default: "" },
     rolledFrom: { type: mongoose.Schema.Types.ObjectId, ref: "OsGoal", default: null },

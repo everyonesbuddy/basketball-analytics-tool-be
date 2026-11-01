@@ -35,11 +35,20 @@ test("windows: each category's length, month ends clamp", () => {
   assert.equal(CATEGORIES.length, 6);
 });
 
-test("mode: locked → Mode 1, single → Mode 2-Single, tiered → Mode 2-Tiered", () => {
-  assert.equal(plan.modeFor(goal({ toolReady: false, toolNeeded: "a gym membership" })).mode, "m1");
-  assert.match(plan.modeFor(goal({ toolReady: false, toolNeeded: "a gym membership" })).reason, /gym membership/);
-  assert.equal(plan.modeFor(goal()).mode, "m2single");
-  assert.equal(plan.modeFor(goal({ obstacle: { kind: "tiered" }, percent: 12 })).mode, "m2tiered");
+test("mode follows the latest session: nothing yet → decide; missing tool → Mode 1; then clear it or chip away", () => {
+  const L = (date, mode, o = {}) => ({ goal: "g1", date, mode, percentGained: 0, ...o });
+  assert.equal(plan.modeFor(goal({ toolReady: null })).mode, null);
+  assert.match(plan.modeFor(goal({ toolReady: null })).reason, /Decide when the block starts/);
+  const m1 = plan.modeFor(goal(), [L("2026-11-02", "m1", { missing: "a gym membership" })]);
+  assert.equal(m1.mode, "m1");
+  assert.match(m1.reason, /gym membership/);
+  assert.equal(plan.modeFor(goal(), [L("2026-11-02", "m1", { missing: "x" }), L("2026-11-03", "m1", { toolAcquired: true })]).mode, null);
+  assert.equal(plan.modeFor(goal(), [L("2026-11-02", "m2single")]).mode, "m2single");
+  assert.equal(plan.modeFor(goal(), [L("2026-11-02", "m2tiered", { percentGained: 3 })]).mode, "m2tiered");
+  // Got the tool again after chipping away: back to chipping away.
+  assert.equal(plan.modeFor(goal(), [L("2026-11-01", "m2tiered", { percentGained: 3 }), L("2026-11-02", "m1", { toolAcquired: true })]).mode, "m2tiered");
+  // A rollover after a ceiling starts in Mode 1 before anything is logged.
+  assert.equal(plan.modeFor(goal({ toolReady: false, toolNeeded: "a new routine" })).mode, "m1");
 });
 
 test("ceiling: flat % over the last 3 tiered sessions sends the goal back to Mode 1", () => {
@@ -49,7 +58,7 @@ test("ceiling: flat % over the last 3 tiered sessions sends the goal back to Mod
   const flat = [log("2026-11-01", 4), log("2026-11-02", 4), log("2026-11-03", 4), log("2026-11-04", 1), log("2026-11-05", 0), log("2026-11-06", 0.5)];
   const c = plan.ceilingCheck(flat);
   assert.equal(c.hit, true);
-  const m = plan.modeFor(goal({ obstacle: { kind: "tiered" } }), flat);
+  const m = plan.modeFor(goal(), flat);
   assert.equal(m.mode, "m1");
   assert.match(m.reason, /Ceiling/);
   assert.equal(plan.ceilingCheck(flat.slice(0, 5)).hit, false, "needs 6 sessions");
@@ -66,8 +75,9 @@ test("window end: early, on time, roll over", () => {
 test("today: the block that's on now, its goal and mode, and what needs attention", () => {
   // Wednesday Nov 4 2026, 9:00 a.m. New York → v1, PF1 block 1.
   const at = new Date("2026-11-04T14:00:00Z");
-  const goals = [goal(), goal({ _id: "g2", category: "PF1", title: "Basketball software job", toolReady: false, toolNeeded: "a portfolio project" })];
-  const t = plan.buildToday({ goals, logs: [], at, tz: "America/New_York" });
+  const goals = [goal(), goal({ _id: "g2", category: "PF1", title: "Basketball software job" })];
+  const logs = [{ goal: "g2", date: "2026-11-03", mode: "m1", missing: "a portfolio project" }];
+  const t = plan.buildToday({ goals, logs, at, tz: "America/New_York" });
   assert.equal(t.date, "2026-11-04");
   assert.equal(t.dayType, "v1");
   assert.equal(t.now.category, "PF1");

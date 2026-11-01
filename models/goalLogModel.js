@@ -10,6 +10,7 @@ const goalLogSchema = new mongoose.Schema(
     percentGained: { type: Number, min: 0, max: 100, default: 0 }, // Mode 2-Tiered
     cleared: { type: Boolean, default: false }, // Mode 2-Single: obstacle (or milestone) cleared
     toolAcquired: { type: Boolean, default: false }, // Mode 1: got the tool
+    missing: { type: String, trim: true, maxlength: 500, default: "" }, // Mode 1: what's missing
     note: { type: String, trim: true, maxlength: 2000, default: "" },
   },
   { timestamps: true },

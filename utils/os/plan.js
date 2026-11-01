@@ -78,14 +78,33 @@ function ceilingCheck(logs = []) {
 
 const round = (n) => Math.round(n * 10) / 10;
 
-/** Which mode a goal is in today, and the reason in plain words. */
+const byTime = (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+
+/**
+ * Which mode a goal is in today, and the reason in plain words. The mode is
+ * decided block by block ("Do I have what I need today?"), so it follows the
+ * latest session logged. A tiered goal whose % has gone flat goes back to
+ * Mode 1 (ceiling). With nothing logged yet, it's decided at the first block.
+ */
 function modeFor(goal, logs = []) {
   if (!goal) return null;
-  if (!goal.toolReady) {
-    return { mode: "m1", reason: goal.toolNeeded ? `Locked: you still need ${goal.toolNeeded}. Work on getting it.` : "Locked: a tool or prerequisite is missing. Name it, then get it." };
+  const sorted = [...logs].sort(byTime);
+  const last = sorted.at(-1);
+  const missing = (last && last.missing) || goal.toolNeeded;
+  if (!last) {
+    if (goal.toolReady === false && goal.toolNeeded) return { mode: "m1", reason: `Get the tool first: ${goal.toolNeeded}.` };
+    return { mode: null, reason: "Decide when the block starts: do you have what you need today? Then clear it in one go, or chip away." };
   }
-  if (goal.obstacle?.kind === "tiered") {
-    const ceiling = ceilingCheck(logs);
+  if (last.mode === "m1" && !last.toolAcquired) {
+    return { mode: "m1", reason: missing ? `Get the tool first: ${missing}.` : "Get the tool first: name what's missing, then get it." };
+  }
+  // The tool is in hand: keep attacking the way you last did.
+  const lastAttack = [...sorted].reverse().find((l) => l.mode !== "m1");
+  if (last.mode === "m1" && last.toolAcquired && !lastAttack) {
+    return { mode: null, reason: "You got the tool. Now attack the obstacle: clear it in one go, or chip away." };
+  }
+  if ((lastAttack && lastAttack.mode) === "m2tiered") {
+    const ceiling = ceilingCheck(sorted);
     if (ceiling.hit) {
       return {
         mode: "m1",
@@ -93,9 +112,9 @@ function modeFor(goal, logs = []) {
         reason: `Ceiling: your last 3 sessions earned ${ceiling.recent}% against ${ceiling.before}% the 3 before. The tool has stopped working; find the next one instead of repeating the same action.`,
       };
     }
-    return { mode: "m2tiered", reason: `Tool in hand and the obstacle recurs. Attack today's instance and log the % you earn. ${round(goal.percent || 0)}% so far.` };
+    return { mode: "m2tiered", reason: `Chip away: attack today's instance and log the % you earn. ${round(goal.percent || 0)}% so far.` };
   }
-  return { mode: "m2single", reason: "Tool in hand and one obstacle in the way. Attack it directly and try to clear it today." };
+  return { mode: "m2single", reason: "Clear it: attack the obstacle directly and try to finish it today." };
 }
 
 /** Where a goal stands in its window, and what the framework says to do at the end. */
@@ -146,7 +165,7 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
       goalId: info ? String(info.goal._id) : null,
       goalTitle: info?.goal.title || null,
       mode: info?.mode || null,
-      modeName: info ? MODES[info.mode].name : null,
+      modeName: info ? (info.mode ? MODES[info.mode].name : null) : null,
       reason: info?.reason || (b.goal ? "No active goal in this category yet." : null),
       loggedToday: info?.loggedToday || false,
     };
@@ -181,7 +200,7 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
         categoryName: c.name,
         goal: info?.goal || null,
         mode: info?.mode || null,
-        modeName: info ? MODES[info.mode].name : null,
+        modeName: info ? (info.mode ? MODES[info.mode].name : null) : null,
         reason: info?.reason || null,
         ceiling: info?.ceiling || null,
         window: info?.window || null,
@@ -216,7 +235,7 @@ function buildReview({ goals = [], logs = [], date }) {
         category: g.category,
         title: g.title,
         mode: m.mode,
-        modeName: MODES[m.mode].name,
+        modeName: m.mode ? MODES[m.mode].name : null,
         reason: m.reason,
         sessions: week.length,
         percentThisWeek: round(week.reduce((s, l) => s + (Number(l.percentGained) || 0), 0)),

@@ -214,13 +214,19 @@ exports.createLog = async (req, res) => {
     percentGained,
     cleared: mode === "m2single" && Boolean(b.cleared),
     toolAcquired: mode === "m1" && Boolean(b.toolAcquired),
+    missing: mode === "m1" ? str(b.missing, 500) : "",
     note: str(b.note, 2000),
   });
-  // Keep the goal's state in step with what was logged.
+  // Keep the goal's state in step with what was logged: the mode is decided
+  // block by block, and the goal remembers the latest answers.
   if (percentGained) goal.percent = Math.min(100, Math.round(((goal.percent || 0) + percentGained) * 10) / 10);
-  if (log.toolAcquired) {
+  if (mode === "m1") {
+    goal.toolReady = log.toolAcquired;
+    goal.toolNeeded = log.toolAcquired ? "" : log.missing || goal.toolNeeded;
+  } else {
     goal.toolReady = true;
     goal.toolNeeded = "";
+    goal.obstacle = { ...(goal.obstacle?.toObject?.() || goal.obstacle || {}), kind: mode === "m2tiered" ? "tiered" : "single" };
   }
   await goal.save();
   return res.status(201).json({ success: true, log, goal });

@@ -35,14 +35,19 @@ test("new goal gets its category's window", async () => {
   assert.equal(made.obstacle.bounded, false);
 });
 
-test("logging a tiered session adds its %; getting the tool unlocks the goal", async () => {
-  const g = { _id: gid, percent: 10, toolReady: false, toolNeeded: "a script", save: async () => {} };
+test("logging a tiered session adds its %; Mode 1 remembers what's missing; getting it unlocks the goal", async () => {
+  const g = { _id: gid, percent: 10, toolReady: null, toolNeeded: "", obstacle: { kind: "single" }, save: async () => {} };
   Goal.findOne = async () => g;
   GoalLog.create = async (doc) => doc;
   const r = res();
   await c.createLog({ user, body: { goal: gid, mode: "m2tiered", percentGained: 4.5 } }, r);
   assert.equal(r.statusCode, 201);
   assert.equal(g.percent, 14.5);
+  assert.equal(g.obstacle.kind, "tiered");
+  assert.equal(g.toolReady, true);
+  await c.createLog({ user, body: { goal: gid, mode: "m1", missing: "a script" } }, res());
+  assert.equal(g.toolReady, false);
+  assert.equal(g.toolNeeded, "a script");
   await c.createLog({ user, body: { goal: gid, mode: "m1", toolAcquired: true } }, res());
   assert.equal(g.toolReady, true);
   assert.equal(g.toolNeeded, "");
