@@ -159,3 +159,12 @@ test("a log counts for the block it names; PF1's second block isn't marked done 
   const pf = t.blocks.filter((b) => b.category === "PF1");
   assert.deepEqual(pf.map((b) => b.loggedToday), [true, false]);
 });
+
+test("today's check-in is shown back as what was tapped", () => {
+  const goals = [{ _id: "g2", category: "PF1", title: "Ship v2", status: "active", windowStart: "2026-10-01", windowEnd: "2027-03-31", obstacle: { kind: "single" } }];
+  const logs = [{ goal: "g2", date: "2026-11-02", block: "08:30", mode: "m2single", outcome: "cleared", cleared: true }];
+  const t = plan.buildToday({ goals, logs, at: new Date("2026-11-02T13:00:00-05:00"), tz: "America/New_York" });
+  assert.equal(t.blocks.find((b) => b.start === "08:30").outcomeToday, "cleared");
+  assert.equal(t.blocks.find((b) => b.start === "12:30").outcomeToday, null);
+  assert.equal(t.goals.find((g) => g.category === "PF1").outcomeToday, "cleared");
+});

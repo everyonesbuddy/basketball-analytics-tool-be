@@ -206,13 +206,17 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
   const logsFor = (g) => logs.filter((l) => String(l.goal) === String(g._id));
   const loggedToday = (g) => logsFor(g).some((l) => l.date === date);
   // A block counts as logged when a log names it; older logs (no block) count for the goal's first block today.
-  const loggedBlock = (g, start, firstStart) => logsFor(g).some((l) => l.date === date && (l.block ? l.block === start : start === firstStart));
+  const blockLog = (g, start, firstStart) => logsFor(g).filter((l) => l.date === date && (l.block ? l.block === start : start === firstStart)).sort(byTime).at(-1);
+  const loggedBlock = (g, start, firstStart) => Boolean(blockLog(g, start, firstStart));
+  // What today's check-in said ("progress", "cleared", "blocked"), for showing it back.
+  const outcomeOf = (l) => (l ? l.outcome || (l.mode === "m1" ? "blocked" : l.cleared ? "cleared" : "progress") : null);
+  const todayOutcome = (g) => outcomeOf(logsFor(g).filter((l) => l.date === date).sort(byTime).at(-1));
 
   const perGoal = new Map();
   for (const c of CATEGORIES) {
     const g = active.get(c.key);
     if (!g) continue;
-    perGoal.set(c.key, { goal: g, ...modeFor(g, logsFor(g)), window: windowStatus(g, date), loggedToday: loggedToday(g) });
+    perGoal.set(c.key, { goal: g, ...modeFor(g, logsFor(g)), window: windowStatus(g, date), loggedToday: loggedToday(g), outcomeToday: todayOutcome(g) });
   }
 
   const firstStartOf = (cat) => schedule.blocks.find((x) => x.goal === cat)?.start;
@@ -231,6 +235,7 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
       nextStep: info?.goal.nextStep || "",
       tiered: info?.goal.obstacle?.kind === "tiered",
       loggedToday: info ? loggedBlock(info.goal, b.start, firstStartOf(b.goal)) : false,
+      outcomeToday: info ? outcomeOf(blockLog(info.goal, b.start, firstStartOf(b.goal))) : null,
     };
   });
 
@@ -272,6 +277,7 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
         ceiling: info?.ceiling || null,
         window: info?.window || null,
         loggedToday: info?.loggedToday || false,
+        outcomeToday: info?.outcomeToday || null,
       };
     }),
     attention,
