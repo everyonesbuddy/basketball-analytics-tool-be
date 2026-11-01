@@ -38,7 +38,7 @@ test("windows: each category's length, month ends clamp", () => {
 test("mode follows the latest session: nothing yet → decide; missing tool → Mode 1; then clear it or chip away", () => {
   const L = (date, mode, o = {}) => ({ goal: "g1", date, mode, percentGained: 0, ...o });
   assert.equal(plan.modeFor(goal({ toolReady: null })).mode, null);
-  assert.match(plan.modeFor(goal({ toolReady: null })).reason, /Decide when the block starts/);
+  assert.match(plan.modeFor(goal({ toolReady: null })).reason, /Start on the next step/);
   const m1 = plan.modeFor(goal(), [L("2026-11-02", "m1", { missing: "a gym membership" })]);
   assert.equal(m1.mode, "m1");
   assert.match(m1.reason, /gym membership/);
@@ -109,4 +109,53 @@ test("review: this week's sessions and % per goal", () => {
   assert.equal(r.percentThisWeek, 12);
   assert.equal(r.percentTotal, 20);
   assert.deepEqual(plan.weekOf("2026-11-07"), { start: "2026-11-02", end: "2026-11-08" });
+});
+
+test("focus: always one answer, and what's next across days", () => {
+  const goals = [
+    { _id: "g1", category: "P1", title: "Run 5k under 25", status: "active", windowStart: "2026-10-01", windowEnd: "2026-10-31", obstacle: { kind: "tiered" }, percent: 20, nextStep: "Intervals 6x400" },
+    { _id: "g2", category: "PF1", title: "Ship v2", status: "active", windowStart: "2026-10-01", windowEnd: "2027-03-31", obstacle: { kind: "single" }, nextStep: "" },
+  ];
+  const tz = "America/New_York";
+  const at = (iso, extra = {}) => plan.buildToday({ goals, logs: [], at: new Date(iso), tz, ...extra }).focus;
+
+  // Saturday night: free time; next is the review (Sunday's slot)
+  let f = at("2026-10-31T23:30:00-04:00");
+  assert.equal(f.state, "free");
+  assert.equal(f.next.review, true);
+  assert.equal(f.next.day, "Tomorrow");
+
+  // Sunday 3 AM: off schedule, next is today's review
+  f = at("2026-11-01T03:26:00-05:00");
+  assert.equal(f.state, "off");
+  assert.equal(f.next.day, "Today");
+  assert.equal(f.next.start, "14:00");
+
+  // Review done: next skips it and lands on Monday's first goal block with its next step
+  f = at("2026-11-01T03:26:00-05:00", { reviewDone: true });
+  assert.equal(f.next.day, "Tomorrow");
+  assert.equal(f.next.goalTitle, "Run 5k under 25");
+  assert.equal(f.next.nextStep, "Intervals 6x400");
+
+  // Sunday after the slot, not done: still due
+  assert.equal(at("2026-11-01T16:00:00-05:00").state, "review");
+  assert.equal(at("2026-11-01T16:00:00-05:00", { reviewDone: true }).state, "free");
+
+  // Monday in a goal block, then a break pointing to the next one
+  f = at("2026-11-02T06:20:00-05:00");
+  assert.equal(f.state, "goal");
+  assert.equal(f.block.goalTitle, "Run 5k under 25");
+  assert.equal(f.block.nextStep, "Intervals 6x400");
+  assert.equal(f.next.goalTitle, "Ship v2");
+  f = at("2026-11-02T07:10:00-05:00");
+  assert.equal(f.state, "break");
+  assert.equal(f.next.start, "08:30");
+});
+
+test("a log counts for the block it names; PF1's second block isn't marked done by the first", () => {
+  const goals = [{ _id: "g2", category: "PF1", title: "Ship v2", status: "active", windowStart: "2026-10-01", windowEnd: "2027-03-31", obstacle: { kind: "single" } }];
+  const logs = [{ goal: "g2", date: "2026-11-02", block: "08:30", mode: "m2single", outcome: "progress" }];
+  const t = plan.buildToday({ goals, logs, at: new Date("2026-11-02T13:00:00-05:00"), tz: "America/New_York" });
+  const pf = t.blocks.filter((b) => b.category === "PF1");
+  assert.deepEqual(pf.map((b) => b.loggedToday), [true, false]);
 });

@@ -92,6 +92,7 @@ function goalFields(body, { partial = false } = {}) {
   set("notes", body.notes === undefined ? undefined : str(body.notes, 4000));
   set("toolReady", body.toolReady === undefined ? undefined : Boolean(body.toolReady));
   set("toolNeeded", body.toolNeeded === undefined ? undefined : str(body.toolNeeded, 500));
+  set("nextStep", body.nextStep === undefined ? undefined : str(body.nextStep, 500));
   if (body.percent !== undefined) set("percent", Math.max(0, Math.min(100, Number(body.percent) || 0)));
   if (body.obstacle) {
     const kind = body.obstacle.kind === "tiered" ? "tiered" : "single";
@@ -207,20 +208,27 @@ exports.createLog = async (req, res) => {
   if (!isId(b.goal)) return fail(res, 400, "Which goal?");
   const goal = await Goal.findOne({ _id: b.goal, owner: req.user.id });
   if (!goal) return fail(res, 404, "Goal not found");
-  const mode = ["m1", "m2single", "m2tiered"].includes(b.mode) ? b.mode : null;
-  if (!mode) return fail(res, 400, "Which mode did you work in?");
+  // One tap at the end of a block: moved it forward, cleared it, or stuck.
+  // The framework's mode follows from it (stuck = something's missing = Mode 1).
+  const outcome = ["progress", "cleared", "blocked"].includes(b.outcome) ? b.outcome : null;
+  let mode = ["m1", "m2single", "m2tiered"].includes(b.mode) ? b.mode : null;
+  if (!mode && outcome) mode = outcome === "blocked" ? "m1" : outcome === "cleared" ? "m2single" : goal.obstacle?.kind === "tiered" ? "m2tiered" : "m2single";
+  if (!mode) return fail(res, 400, "How did it go?");
   const percentGained = mode === "m2tiered" ? Math.max(0, Math.min(100, Number(b.percentGained) || 0)) : 0;
   const log = await GoalLog.create({
     owner: req.user.id,
     goal: goal._id,
     date: DATE.test(b.date || "") ? b.date : today(),
+    block: /^\d{2}:\d{2}$/.test(b.block || "") ? b.block : null,
+    outcome,
     mode,
     percentGained,
-    cleared: mode === "m2single" && Boolean(b.cleared),
+    cleared: (mode === "m2single" && Boolean(b.cleared)) || outcome === "cleared",
     toolAcquired: mode === "m1" && Boolean(b.toolAcquired),
     missing: mode === "m1" ? str(b.missing, 500) : "",
     note: str(b.note, 2000),
   });
+  if (b.nextStep !== undefined) goal.nextStep = str(b.nextStep, 500);
   // Keep the goal's state in step with what was logged: the mode is decided
   // block by block, and the goal remembers the latest answers.
   if (percentGained) goal.percent = Math.min(100, Math.round(((goal.percent || 0) + percentGained) * 10) / 10);
@@ -266,5 +274,7 @@ exports.saveReview = async (req, res) => {
     { $set: { entries, notes: str(req.body?.notes, 4000) } },
     { upsert: true, new: true, runValidators: true },
   ).lean();
+  // The review's next actions become each goal's next step, so the next block starts itself.
+  await Promise.all(entries.filter((e) => e.nextAction).map((e) => Goal.updateOne({ _id: e.goal, owner: req.user.id }, { $set: { nextStep: e.nextAction.slice(0, 500) } })));
   return res.json({ success: true, review });
 };

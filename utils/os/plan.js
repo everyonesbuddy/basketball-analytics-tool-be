@@ -93,7 +93,7 @@ function modeFor(goal, logs = []) {
   const missing = (last && last.missing) || goal.toolNeeded;
   if (!last) {
     if (goal.toolReady === false && goal.toolNeeded) return { mode: "m1", reason: `Get the tool first: ${goal.toolNeeded}.` };
-    return { mode: null, reason: "Decide when the block starts: do you have what you need today? Then clear it in one go, or chip away." };
+    return { mode: null, reason: "Start on the next step. At the end of the block, tap how it went." };
   }
   if (last.mode === "m1" && !last.toolAcquired) {
     return { mode: "m1", reason: missing ? `Get the tool first: ${missing}.` : "Get the tool first: name what's missing, then get it." };
@@ -135,6 +135,64 @@ function quoteFor(date) {
   return QUOTES[((n % QUOTES.length) + QUOTES.length) % QUOTES.length];
 }
 
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const LONG_DAY = { Sun: "Sunday", Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday" };
+const addDays = (date, n) => new Date(Date.parse(`${date}T12:00:00Z`) + n * DAY).toISOString().slice(0, 10);
+const weekdayOf = (date) => WEEKDAYS[new Date(`${date}T12:00:00Z`).getUTCDay()];
+
+/**
+ * The next goal block or due weekly review after now, looking up to a week
+ * ahead: what's next and when ("Monday 6:15 AM").
+ */
+function upcoming({ date, minutes, perGoal, reviewDone }) {
+  const thisWeek = weekOf(date).start;
+  for (let i = 0; i <= 7; i += 1) {
+    const d = addDays(date, i);
+    const wd = weekdayOf(d);
+    for (const b of SCHEDULES[dayType(wd)].blocks) {
+      if (i === 0 && toMin(b.start) <= minutes) continue;
+      if (b.review && reviewDone && weekOf(d).start === thisWeek) continue;
+      if (!b.goal && !b.review) continue;
+      const info = b.goal ? perGoal.get(b.goal) : null;
+      return {
+        date: d,
+        day: i === 0 ? "Today" : i === 1 ? "Tomorrow" : LONG_DAY[wd],
+        start: b.start,
+        end: b.end,
+        label: b.label,
+        review: Boolean(b.review),
+        category: b.goal || null,
+        goalId: info ? String(info.goal._id) : null,
+        goalTitle: info?.goal.title || null,
+        nextStep: info?.goal.nextStep || "",
+        minutesAway: i * 1440 + toMin(b.start) - minutes,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * The one thing to know right now: the goal block you're in (and its next
+ * step), the review if it's due, or that nothing's scheduled, and in every
+ * case what's next and when.
+ */
+function buildFocus({ date, minutes, weekday, nowBlock, perGoal, reviewDone, reviewBlock }) {
+  const next = upcoming({ date, minutes, perGoal, reviewDone });
+  const base = { next, until: nowBlock ? nowBlock.end : null };
+  if (nowBlock?.category) {
+    return { ...base, state: "goal", block: nowBlock, text: nowBlock.goalTitle ? `Work on: ${nowBlock.goalTitle}` : `${nowBlock.label}: no goal set yet. Set one and use this block.` };
+  }
+  if (nowBlock?.review && !reviewDone) return { ...base, state: "review", block: nowBlock, text: "Weekly review: 30 minutes. Where each goal stands and the next step for each." };
+  // Review slot passed and not done: on Sunday it's still due before Monday.
+  if (reviewBlock && !reviewDone && weekday === "Sun" && minutes >= toMin(reviewBlock.end)) {
+    return { ...base, state: "review", block: null, text: "The weekly review is still due. Do it before Monday so each goal has its next step." };
+  }
+  if (nowBlock && nowBlock.label !== "Free time") return { ...base, state: "break", block: nowBlock, text: `${nowBlock.label} until the next block.` };
+  if (nowBlock) return { ...base, state: "free", block: nowBlock, text: "Free time. Nothing scheduled right now." };
+  return { ...base, state: "off", block: null, text: minutes < 360 ? "Rest. The day starts at 6:00 AM." : "Nothing scheduled." };
+}
+
 /**
  * Today: the schedule with each block's goal, mode and reason, the block
  * that's on now and the next goal block, plus anything that needs a decision
@@ -147,6 +205,8 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
   const active = new Map(goals.filter((g) => g.status === "active").map((g) => [g.category, g]));
   const logsFor = (g) => logs.filter((l) => String(l.goal) === String(g._id));
   const loggedToday = (g) => logsFor(g).some((l) => l.date === date);
+  // A block counts as logged when a log names it; older logs (no block) count for the goal's first block today.
+  const loggedBlock = (g, start, firstStart) => logsFor(g).some((l) => l.date === date && (l.block ? l.block === start : start === firstStart));
 
   const perGoal = new Map();
   for (const c of CATEGORIES) {
@@ -155,6 +215,7 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
     perGoal.set(c.key, { goal: g, ...modeFor(g, logsFor(g)), window: windowStatus(g, date), loggedToday: loggedToday(g) });
   }
 
+  const firstStartOf = (cat) => schedule.blocks.find((x) => x.goal === cat)?.start;
   const blocks = schedule.blocks.map((b) => {
     const info = b.goal ? perGoal.get(b.goal) : null;
     return {
@@ -167,7 +228,9 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
       mode: info?.mode || null,
       modeName: info ? (info.mode ? MODES[info.mode].name : null) : null,
       reason: info?.reason || (b.goal ? "No active goal in this category yet." : null),
-      loggedToday: info?.loggedToday || false,
+      nextStep: info?.goal.nextStep || "",
+      tiered: info?.goal.obstacle?.kind === "tiered",
+      loggedToday: info ? loggedBlock(info.goal, b.start, firstStartOf(b.goal)) : false,
     };
   });
 
@@ -181,11 +244,15 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
     if (info.window.next) attention.push({ kind: info.window.next.scenario, category: c.key, goalId: String(info.goal._id), text: `${info.goal.title}: ${info.window.next.text}` });
     if (info.ceiling?.hit) attention.push({ kind: "ceiling", category: c.key, goalId: String(info.goal._id), text: `${info.goal.title}: ${info.reason}` });
   }
-  if (type === "weekend" && !reviewDone) attention.push({ kind: "review", text: "Weekly goal review is due (2:00 to 2:30 PM): mode, %, ceiling check and next action for each goal." });
+  const reviewBlock = schedule.blocks.find((b) => b.review);
+  if (reviewBlock && !reviewDone && minutes >= toMin(reviewBlock.start)) attention.push({ kind: "review", text: "Weekly goal review is due: where each goal stands and the next step for each, so Monday starts itself." });
 
   const now = blockAt(schedule.blocks, minutes);
   const nextGoalBlock = blocks.find((b) => b.category && !b.past && !b.now) || null;
+  const nowBlock = now ? blocks.find((b) => b.start === now.start) : null;
+  const focus = buildFocus({ date, minutes, weekday, nowBlock, blocks, perGoal, reviewDone, reviewBlock });
   return {
+    focus,
     date,
     weekday,
     dayType: type,
@@ -234,6 +301,7 @@ function buildReview({ goals = [], logs = [], date }) {
         goalId: String(g._id),
         category: g.category,
         title: g.title,
+        nextStep: g.nextStep || "",
         mode: m.mode,
         modeName: m.mode ? MODES[m.mode].name : null,
         reason: m.reason,
@@ -248,4 +316,4 @@ function buildReview({ goals = [], logs = [], date }) {
     });
 }
 
-module.exports = { localParts, dayType, blockAt, addMonths, windowFor, ceilingCheck, modeFor, windowStatus, buildToday, buildReview, weekOf, quoteFor, toMin };
+module.exports = { upcoming, buildFocus, addDays, weekdayOf, localParts, dayType, blockAt, addMonths, windowFor, ceilingCheck, modeFor, windowStatus, buildToday, buildReview, weekOf, quoteFor, toMin };

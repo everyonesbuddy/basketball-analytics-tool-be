@@ -67,3 +67,24 @@ test("rolling over after a ceiling starts the next window in Mode 1", async () =
   assert.equal(r.body.startsIn, "m1");
   assert.equal(next.percent, 40);
 });
+
+test("one-tap log: the outcome sets the mode, the block and the next step", async () => {
+  const g = { _id: gid, percent: 10, toolReady: null, toolNeeded: "", nextStep: "old", obstacle: { kind: "tiered" }, save: async () => {} };
+  Goal.findOne = async () => g;
+  let made;
+  GoalLog.create = async (doc) => (made = doc);
+  await c.createLog({ user, body: { goal: gid, outcome: "progress", block: "08:30", percentGained: 5, nextStep: "Call the next 20" } }, res());
+  assert.equal(made.mode, "m2tiered");
+  assert.equal(made.block, "08:30");
+  assert.equal(g.percent, 15);
+  assert.equal(g.nextStep, "Call the next 20");
+  await c.createLog({ user, body: { goal: gid, outcome: "blocked", missing: "a lead list" } }, res());
+  assert.equal(made.mode, "m1");
+  assert.equal(g.toolNeeded, "a lead list");
+  await c.createLog({ user, body: { goal: gid, outcome: "cleared" } }, res());
+  assert.equal(made.mode, "m2single");
+  assert.equal(made.cleared, true);
+  const r = res();
+  await c.createLog({ user, body: { goal: gid } }, r);
+  assert.equal(r.statusCode, 400);
+});
