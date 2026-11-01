@@ -73,7 +73,11 @@ exports.today = async (req, res) => {
   const { goals, logs } = await loadPlanData(req.user.id);
   const date = today();
   const reviewDone = await Review.exists({ owner: req.user.id, week: plan.weekOf(date).start });
-  return res.json({ success: true, ...plan.buildToday({ goals, logs, reviewDone: Boolean(reviewDone) }), modes: MODES });
+  const t = plan.buildToday({ goals, logs, reviewDone: Boolean(reviewDone) });
+  // Gifting reminders that are due soon join the day's decisions.
+  const gifts = (await require("./gifting.controller").remindersFor(req.user.id)).filter((r) => r.priority === 1);
+  t.attention.push(...gifts.map((r) => ({ kind: "gift", text: r.text })));
+  return res.json({ success: true, ...t, modes: MODES });
 };
 
 // ── Goals ───────────────────────────────────────────────────────────────

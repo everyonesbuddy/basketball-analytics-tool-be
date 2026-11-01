@@ -3,6 +3,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const { requireAuth } = require("../middleware/auth");
 const { dbReady } = require("../config/db");
 const c = require("../controllers/os.controller");
+const g = require("../controllers/gifting.controller");
 
 const router = express.Router();
 
@@ -32,5 +33,20 @@ router.delete("/logs/:id", asyncHandler(c.deleteLog));
 
 router.get("/review", asyncHandler(c.getReview));
 router.post("/review", asyncHandler(c.saveReview));
+
+// Gifting
+router.get("/gifting", asyncHandler(g.overview));
+router.post("/gifting/people", asyncHandler(g.createPerson));
+router.patch("/gifting/people/:id", asyncHandler(g.updatePerson));
+router.delete("/gifting/people/:id", asyncHandler(g.deletePerson));
+router.post("/gifting/people/:id/gifts", asyncHandler(g.logGift));
+router.post("/gifting/plans/preview", asyncHandler(g.previewPlan));
+router.post("/gifting/plans", asyncHandler(g.createPlan));
+router.patch("/gifting/plans/:id", asyncHandler(g.updatePlan));
+router.delete("/gifting/plans/:id", asyncHandler(g.deletePlan));
+router.post("/gifting/link-preview", asyncHandler(g.linkPreview));
+router.post("/gifting/ideas", asyncHandler(g.createIdea));
+router.patch("/gifting/ideas/:id", asyncHandler(g.updateIdea));
+router.delete("/gifting/ideas/:id", asyncHandler(g.deleteIdea));
 
 module.exports = router;
