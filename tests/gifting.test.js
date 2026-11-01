@@ -46,6 +46,21 @@ test("hamper: picks by relationship and stays within budget", () => {
   assert.equal(g.planHamper({ relationship: "wife", budget: 15 }).best.items.length < 2, true);
 });
 
+test("services: only for relationships they suit, filtered by place, budget-fitting first; off when asked", () => {
+  for (const sv of G.SERVICES) for (const r of sv.for) assert.ok(G.HAMPER_FOR[r], `${sv.key} → ${r}`);
+  const ng = g.planHamper({ relationship: "mother_in_law", budget: 60, where: "ng" });
+  assert.ok(ng.services.length > 0);
+  assert.ok(ng.services.every((x) => x.where !== "us"));
+  assert.ok(ng.services.some((x) => x.key === "airtime"));
+  assert.equal(ng.services[0].fits, true);
+  assert.ok(!g.planHamper({ relationship: "child", budget: 30 }).services.some((x) => x.key === "spa"));
+  assert.equal(g.planHamper({ relationship: "wife", budget: 100, services: false }).services.length, 0);
+  // Every suggestion carries its own search words.
+  assert.ok(ng.search && ng.best.items.every((i) => i.search) && ng.best.container.search);
+  const grp = g.planGroup({ budget: 300, counts: { adult: 4 } });
+  assert.ok(grp.packages[0].search && grp.packages[0].details.every((d) => d.search) && grp.shopping.every((s) => s.search));
+});
+
 test("reminders: dates coming up, close people not gifted lately, shopping and packing due, and the weekly nudge", () => {
   const today = "2026-11-01";
   const people = [

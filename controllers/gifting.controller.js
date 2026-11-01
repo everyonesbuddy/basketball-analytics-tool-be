@@ -63,6 +63,7 @@ function personFields(b) {
   if (Array.isArray(b.dates)) out.dates = b.dates.filter((d) => MD.test(d?.md || "")).slice(0, 10).map((d) => ({ label: str(d.label, 60) || "date", md: d.md }));
   if (b.sizes) out.sizes = { shirt: str(b.sizes.shirt, 20), shoe: str(b.sizes.shoe, 20) };
   if (b.likes !== undefined) out.likes = str(b.likes, 500);
+  if (b.servicesOk !== undefined) out.servicesOk = Boolean(b.servicesOk);
   if (b.notes !== undefined) out.notes = str(b.notes, 2000);
   return out;
 }
@@ -104,7 +105,13 @@ function cleanInputs(kind, b = {}) {
     const counts = Object.fromEntries(G.GROUPS.map((g) => [g.key, Math.floor(num(b.counts?.[g.key], 0, 500) || 0)]));
     return { budget: num(b.budget, 0, 100000) || 0, counts, special: Math.floor(num(b.special, 0, 200) || 0), womenShare: num(b.womenShare, 0, 1) ?? 0.5, suitcases: Math.floor(num(b.suitcases, 1, 10) || 1) };
   }
-  return { budget: num(b.budget, 0, 100000) || 0, relationship: G.RELATIONSHIPS.some((r) => r.key === b.relationship) ? b.relationship : "friend", likes: str(b.likes, 300) };
+  return {
+    budget: num(b.budget, 0, 100000) || 0,
+    relationship: G.RELATIONSHIPS.some((r) => r.key === b.relationship) ? b.relationship : "friend",
+    likes: str(b.likes, 300),
+    services: b.services !== false,
+    where: ["us", "ng"].includes(b.where) ? b.where : "any",
+  };
 }
 
 const compute = (kind, inputs) => (kind === "group" ? gifting.planGroup(inputs) : gifting.planHamper(inputs));

@@ -35,28 +35,32 @@ function planGroup({ budget = 150, counts = {}, special = 0, womenShare = 0.5, s
       const women = g.key === "child" ? 0 : Math.round(g.count * share);
       const men = g.count - women;
       const items = [];
+      const details = [];
       let cost = 0;
       for (const slot of G.PACKAGES[g.pkg].slots) {
         if (slot.optional && g.dropOptional) continue;
         if (slot.item) {
           need[slot.item] = (need[slot.item] || 0) + g.count;
           items.push(G.ITEMS[slot.item].name);
+          details.push({ name: G.ITEMS[slot.item].name, search: G.ITEMS[slot.item].search });
           cost += unit(slot.item) * g.count;
         } else {
           const { men: m, women: w } = slot.split;
           if (men) need[m] = (need[m] || 0) + men;
           if (women) need[w] = (need[w] || 0) + women;
           items.push(men && women ? `${G.ITEMS[m].name} (men) or ${G.ITEMS[w].name} (women)` : G.ITEMS[men ? m : w].name);
+          if (men) details.push({ name: `${G.ITEMS[m].name}${women ? " (men)" : ""}`, search: G.ITEMS[m].search });
+          if (women) details.push({ name: `${G.ITEMS[w].name}${men ? " (women)" : ""}`, search: G.ITEMS[w].search });
           cost += unit(m) * men + unit(w) * women;
         }
       }
-      return { group: g.key, groupName: g.name, count: g.count, package: g.pkg, name: G.PACKAGES[g.pkg].name, target: G.PACKAGES[g.pkg].target, items, perPerson: money(cost / g.count), trimmed: g.dropOptional };
+      return { group: g.key, groupName: g.name, count: g.count, package: g.pkg, name: G.PACKAGES[g.pkg].name, search: G.PACKAGES[g.pkg].search, target: G.PACKAGES[g.pkg].target, items, details, perPerson: money(cost / g.count), trimmed: g.dropOptional };
     });
     const shopping = Object.entries(need)
       .map(([key, qty]) => {
         const it = G.ITEMS[key];
         const packs = Math.ceil(qty / it.packCount);
-        return { key, name: it.name, category: it.category, store: it.store, qty, packs, packCount: it.packCount, packPrice: it.packPrice, cost: money(packs * it.packPrice), spare: packs * it.packCount - qty, weightLb: it.weightLb * qty, caution: it.caution || null };
+        return { key, name: it.name, search: it.search, category: it.category, store: it.store, qty, packs, packCount: it.packCount, packPrice: it.packPrice, cost: money(packs * it.packPrice), spare: packs * it.packCount - qty, weightLb: it.weightLb * qty, caution: it.caution || null };
       })
       .sort((a, b) => a.store.localeCompare(b.store) || b.cost - a.cost);
     const items = shopping.reduce((s, x) => s + x.cost, 0);
@@ -137,7 +141,7 @@ function planGroup({ budget = 150, counts = {}, special = 0, womenShare = 0.5, s
  * in order while they fit the budget (after the container, a card and tax).
  * Also returns the other hampers that fit, as alternatives.
  */
-function planHamper({ relationship = "friend", budget = 50, likes = "" } = {}) {
+function planHamper({ relationship = "friend", budget = 50, likes = "", services = true, where = "any" } = {}) {
   const keys = G.HAMPER_FOR[relationship] || G.HAMPER_FOR.friend;
   const card = 3;
   const options = keys.map((key) => {
@@ -156,6 +160,7 @@ function planHamper({ relationship = "friend", budget = 50, likes = "" } = {}) {
     return {
       key,
       name: h.name,
+      search: h.search,
       container: h.container,
       items: chosen,
       skipped: h.items.filter((i) => !chosen.includes(i)).map((i) => i.name),
@@ -165,9 +170,18 @@ function planHamper({ relationship = "friend", budget = 50, likes = "" } = {}) {
     };
   });
   const tooSmall = options[0].items.length < 2;
+  // Services and experiences that suit this relationship and place, within budget first.
+  const serviceIdeas = services
+    ? G.SERVICES.filter((s) => s.for.includes(relationship) && (where === "any" || s.where === "any" || s.where === where))
+        .map((s) => ({ ...s, fits: s.price <= budget }))
+        .sort((a, b) => Number(b.fits) - Number(a.fits) || a.price - b.price)
+        .slice(0, 4)
+    : [];
   return {
     relationship,
     budget: money(budget),
+    search: G.HAMPERS[keys[0]].search,
+    services: serviceIdeas,
     best: options[0],
     alternatives: options.slice(1),
     tips: [
