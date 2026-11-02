@@ -20,7 +20,7 @@ Without `MONGODB_URI` the OS answers 503 and the sports tools keep working.
 ### What the OS does
 
 - **The framework is static** (`config/os/framework.js`): the six categories and their windows, the Mon/Wed/Fri and Tue/Thu schedules, the weekend review, the modes and the quotes.
-- **The rules are pure functions** (`utils/os/plan.js`): today's schedule, the block that's on now, each goal's mode and why (locked → Mode 1; single → Mode 2-Single; tiered → Mode 2-Tiered), the ceiling check (the last 3 tiered sessions earned nothing, or under half the 3 before), and what to do when a window ends.
+- **The rules are pure functions** (`utils/os/plan.js`): today's schedule, the block that's on now and what's next, each goal's mode as a hint (chip-away goals: Mode 2 in %; others: Mode 2, clear it), check-ins per block, and what to do when a window ends.
 - **What you enter**: each goal once (title, outcome, obstacle type, tool ready or what's missing), a quick log per block (mode and % gained, cleared, or tool acquired), and the weekend review.
 
 ### Endpoints (all under `/api/os`, Bearer token except login)
@@ -33,8 +33,8 @@ Without `MONGODB_URI` the OS answers 503 and the sports tools keep working.
 | GET | `/framework` | Categories, schedules, modes, framework text, quotes |
 | GET | `/today` | Today's schedule with each block's goal, mode and reason; what needs attention; quote |
 | GET/POST/PATCH/DELETE | `/goals` | Goals (one active per category) |
-| POST | `/goals/:id/close` | `completed`, `expand` or `rollover` (rollover after a ceiling starts in Mode 1) |
-| GET/POST/DELETE | `/logs` | Block logs; a tiered log adds its % to the goal, a Mode 1 log with the tool acquired unlocks it |
+| POST | `/goals/:id/close` | `completed`, `expand` or `rollover` (rollover keeps the goal and its next step for a new window) |
+| GET/POST/DELETE | `/logs` | Check-ins: `outcome` is `progress` (moved it forward today) or `cleared` (cleared for the period: the goal goes to 100%); deleting one undoes it |
 | GET/POST | `/review` | This week's numbers per goal, and the saved review |
 
 Tests: `npm test`.

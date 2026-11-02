@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const plan = require("../utils/os/plan");
 const { SCHEDULES, CATEGORIES } = require("../config/os/framework");
 
-const goal = (over = {}) => ({ _id: "g1", category: "P1", title: "Six pack", status: "active", windowStart: "2026-11-01", windowEnd: "2026-11-30", obstacle: { kind: "single" }, toolReady: true, percent: 0, ...over });
+const goal = (over = {}) => ({ _id: "g1", category: "P1", title: "Six pack", status: "active", windowStart: "2026-11-01", windowEnd: "2026-11-30", obstacle: { kind: "single" }, percent: 0, ...over });
 
 test("schedules: weekdays alternate, weekend has the review, blocks run in order without gaps", () => {
   assert.equal(plan.dayType("Mon"), "v1");
@@ -35,33 +35,13 @@ test("windows: each category's length, month ends clamp", () => {
   assert.equal(CATEGORIES.length, 6);
 });
 
-test("mode follows the latest session: nothing yet → decide; missing tool → Mode 1; then clear it or chip away", () => {
-  const L = (date, mode, o = {}) => ({ goal: "g1", date, mode, percentGained: 0, ...o });
-  assert.equal(plan.modeFor(goal({ toolReady: null })).mode, null);
-  assert.match(plan.modeFor(goal({ toolReady: null })).reason, /Start on the next step/);
-  const m1 = plan.modeFor(goal(), [L("2026-11-02", "m1", { missing: "a gym membership" })]);
-  assert.equal(m1.mode, "m1");
-  assert.match(m1.reason, /gym membership/);
-  assert.equal(plan.modeFor(goal(), [L("2026-11-02", "m1", { missing: "x" }), L("2026-11-03", "m1", { toolAcquired: true })]).mode, null);
-  assert.equal(plan.modeFor(goal(), [L("2026-11-02", "m2single")]).mode, "m2single");
-  assert.equal(plan.modeFor(goal(), [L("2026-11-02", "m2tiered", { percentGained: 3 })]).mode, "m2tiered");
-  // Got the tool again after chipping away: back to chipping away.
-  assert.equal(plan.modeFor(goal(), [L("2026-11-01", "m2tiered", { percentGained: 3 }), L("2026-11-02", "m1", { toolAcquired: true })]).mode, "m2tiered");
-  // A rollover after a ceiling starts in Mode 1 before anything is logged.
-  assert.equal(plan.modeFor(goal({ toolReady: false, toolNeeded: "a new routine" })).mode, "m1");
-});
-
-test("ceiling: flat % over the last 3 tiered sessions sends the goal back to Mode 1", () => {
-  const log = (date, p) => ({ goal: "g1", date, mode: "m2tiered", percentGained: p });
-  const steady = [1, 2, 3, 4, 5, 6].map((d) => log(`2026-11-0${d}`, 3));
-  assert.equal(plan.ceilingCheck(steady).hit, false);
-  const flat = [log("2026-11-01", 4), log("2026-11-02", 4), log("2026-11-03", 4), log("2026-11-04", 1), log("2026-11-05", 0), log("2026-11-06", 0.5)];
-  const c = plan.ceilingCheck(flat);
-  assert.equal(c.hit, true);
-  const m = plan.modeFor(goal(), flat);
-  assert.equal(m.mode, "m1");
-  assert.match(m.reason, /Ceiling/);
-  assert.equal(plan.ceilingCheck(flat.slice(0, 5)).hit, false, "needs 6 sessions");
+test("mode is a hint from the goal: chip-away goals are Mode 2 in %, others Mode 2 clear it", () => {
+  assert.equal(plan.modeFor(goal()).mode, "m2single");
+  assert.match(plan.modeFor(goal()).reason, /Start on the next step/);
+  const tiered = plan.modeFor(goal({ obstacle: { kind: "tiered" }, percent: 20 }));
+  assert.equal(tiered.mode, "m2tiered");
+  assert.match(tiered.reason, /20% so far/);
+  assert.equal(plan.modeFor(null), null);
 });
 
 test("window end: early, on time, roll over", () => {
@@ -72,19 +52,20 @@ test("window end: early, on time, roll over", () => {
   assert.equal(plan.windowStatus(goal(), "2026-11-20").daysLeft, 10);
 });
 
-test("today: the block that's on now, its goal and mode, and what needs attention", () => {
-  // Wednesday Nov 4 2026, 9:00 a.m. New York → v1, PF1 block 1.
+test("today: the block that is on now, its goal and next step, and what needs attention", () => {
+  // Wednesday Nov 4 2026, 9:00 a.m. New York: v1, PF1 block 1.
   const at = new Date("2026-11-04T14:00:00Z");
-  const goals = [goal(), goal({ _id: "g2", category: "PF1", title: "Basketball software job" })];
-  const logs = [{ goal: "g2", date: "2026-11-03", mode: "m1", missing: "a portfolio project" }];
+  const goals = [goal(), goal({ _id: "g2", category: "PF1", title: "Basketball software job", nextStep: "Finish the portfolio project" })];
+  const logs = [{ goal: "g2", date: "2026-11-03", outcome: "progress" }];
   const t = plan.buildToday({ goals, logs, at, tz: "America/New_York" });
   assert.equal(t.date, "2026-11-04");
   assert.equal(t.dayType, "v1");
   assert.equal(t.now.category, "PF1");
-  assert.equal(t.now.mode, "m1");
-  assert.match(t.now.reason, /portfolio project/);
+  assert.equal(t.now.nextStep, "Finish the portfolio project");
+  assert.equal(t.now.loggedToday, false);
   assert.equal(t.nextGoalBlock.category, "PF1"); // block 2 after lunch
   assert.equal(t.attention.filter((a) => a.kind === "missing").length, 4);
+  assert.ok(!t.attention.some((a) => a.kind === "ceiling"));
   assert.ok(t.quote.length > 10);
 });
 
@@ -97,17 +78,19 @@ test("today on a weekend asks for the review until it's saved", () => {
   assert.ok(!plan.buildToday({ goals: [], logs: [], at, tz: "America/New_York", reviewDone: true }).attention.some((a) => a.kind === "review"));
 });
 
-test("review: this week's sessions and % per goal", () => {
+test("review: this week's check-ins per goal, days worked, and whether it was cleared", () => {
   const g = goal({ obstacle: { kind: "tiered" }, percent: 20 });
   const logs = [
-    { goal: "g1", date: "2026-11-02", mode: "m2tiered", percentGained: 5 },
-    { goal: "g1", date: "2026-11-04", mode: "m2tiered", percentGained: 7 },
-    { goal: "g1", date: "2026-10-28", mode: "m2tiered", percentGained: 8 },
+    { goal: "g1", date: "2026-11-02", outcome: "progress", block: "06:15" },
+    { goal: "g1", date: "2026-11-02", outcome: "progress", block: "18:30" },
+    { goal: "g1", date: "2026-11-04", outcome: "cleared" },
+    { goal: "g1", date: "2026-10-28", outcome: "progress" },
   ];
   const [r] = plan.buildReview({ goals: [g], logs, date: "2026-11-07" });
-  assert.equal(r.sessions, 2);
-  assert.equal(r.percentThisWeek, 12);
-  assert.equal(r.percentTotal, 20);
+  assert.equal(r.sessions, 3);
+  assert.equal(r.daysWorked, 2);
+  assert.equal(r.cleared, true);
+  assert.equal(r.percentThisWeek, undefined);
   assert.deepEqual(plan.weekOf("2026-11-07"), { start: "2026-11-02", end: "2026-11-08" });
 });
 
@@ -154,7 +137,7 @@ test("focus: always one answer, and what's next across days", () => {
 
 test("a log counts for the block it names; PF1's second block isn't marked done by the first", () => {
   const goals = [{ _id: "g2", category: "PF1", title: "Ship v2", status: "active", windowStart: "2026-10-01", windowEnd: "2027-03-31", obstacle: { kind: "single" } }];
-  const logs = [{ goal: "g2", date: "2026-11-02", block: "08:30", mode: "m2single", outcome: "progress" }];
+  const logs = [{ goal: "g2", date: "2026-11-02", block: "08:30", outcome: "progress" }];
   const t = plan.buildToday({ goals, logs, at: new Date("2026-11-02T13:00:00-05:00"), tz: "America/New_York" });
   const pf = t.blocks.filter((b) => b.category === "PF1");
   assert.deepEqual(pf.map((b) => b.loggedToday), [true, false]);
@@ -162,7 +145,7 @@ test("a log counts for the block it names; PF1's second block isn't marked done 
 
 test("today's check-in is shown back as what was tapped", () => {
   const goals = [{ _id: "g2", category: "PF1", title: "Ship v2", status: "active", windowStart: "2026-10-01", windowEnd: "2027-03-31", obstacle: { kind: "single" } }];
-  const logs = [{ goal: "g2", date: "2026-11-02", block: "08:30", mode: "m2single", outcome: "cleared", cleared: true }];
+  const logs = [{ goal: "g2", date: "2026-11-02", block: "08:30", outcome: "cleared" }];
   const t = plan.buildToday({ goals, logs, at: new Date("2026-11-02T13:00:00-05:00"), tz: "America/New_York" });
   assert.equal(t.blocks.find((b) => b.start === "08:30").outcomeToday, "cleared");
   assert.equal(t.blocks.find((b) => b.start === "12:30").outcomeToday, null);
