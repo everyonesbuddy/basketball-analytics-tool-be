@@ -43,6 +43,8 @@ function pick(wardrobe, slot, color, { tonal, used, trad = false }) {
   if (same) return same;
   // A black shoe goes with any tonal look that isn't olive.
   if (tonal && slot === "shoe" && fam !== "olive") return pool.find((w) => w.color === "black") || null;
+  // Native looks: any native shoes you own will do.
+  if (trad && slot === "shoe") return pool.find((w) => w.trad) || null;
   return null;
 }
 
