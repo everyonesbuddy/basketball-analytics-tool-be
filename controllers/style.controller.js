@@ -49,7 +49,7 @@ exports.overview = async (req, res) => {
     shop,
     recent,
     gaps: style.gaps({ wardrobe }),
-    guide: { colors: S.COLORS, tonal: S.TONAL, structures: S.STRUCTURES, silhouette: S.SILHOUETTE, occasions: S.OCCASIONS, looks: S.LOOKS, tallNote: S.TALL_NOTE },
+    guide: { colors: S.COLORS, tonal: S.TONAL, structures: S.STRUCTURES, silhouette: S.SILHOUETTE, occasions: S.OCCASIONS, looks: S.LOOKS, tallNote: S.TALL_NOTE, tradNotes: S.TRAD_NOTES },
   });
 };
 
@@ -83,12 +83,13 @@ function itemFields(b, partial) {
   if (b.link !== undefined) out.link = url(b.link);
   if (b.image !== undefined) out.image = url(b.image);
   if (b.active !== undefined) out.active = Boolean(b.active);
+  if (b.trad !== undefined) out.trad = Boolean(b.trad);
   return out;
 }
 
 exports.addItem = async (req, res) => {
   const f = itemFields(req.body || {}, false);
-  if (!f.slot) return fail(res, 400, "Pick top, bottom, layer or shoe.");
+  if (!f.slot) return fail(res, 400, "Pick top, bottom, layer, shoe or fila.");
   if (!f.color) return fail(res, 400, "Pick a color.");
   if (!f.name) f.name = `${S.COLORS[f.color].name} ${f.slot}`;
   const item = await Wardrobe.create({ owner: req.user.id, ...f });
@@ -184,7 +185,8 @@ exports.updateShop = async (req, res) => {
   // Bought it? Put it in the wardrobe so outfits can use it.
   let added = null;
   if (b.status === "bought" && b.addToWardrobe && item.slot && item.color) {
-    added = await Wardrobe.create({ owner: req.user.id, name: item.title.slice(0, 160) || `${S.COLORS[item.color].name} ${item.slot}`, slot: item.slot, color: item.color, link: item.url, image: item.image });
+    const native = S.CORE.find((c) => c.key === item.core)?.group === "traditional";
+    added = await Wardrobe.create({ owner: req.user.id, name: item.title.slice(0, 160) || `${S.COLORS[item.color].name} ${item.slot}`, slot: item.slot, color: item.color, link: item.url, image: item.image, trad: native });
   }
   return res.json({ success: true, item, added });
 };

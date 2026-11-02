@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const owner = { type: mongoose.Schema.Types.ObjectId, ref: "OsUser", required: true, index: true };
-const SLOTS = ["top", "bottom", "layer", "shoe"];
+const SLOTS = ["top", "bottom", "layer", "shoe", "cap"];
 
 // Where you are, so the outfit can follow the weather.
 const profileSchema = new mongoose.Schema(
@@ -24,6 +24,7 @@ const wardrobeSchema = new mongoose.Schema(
     note: { type: String, trim: true, maxlength: 500, default: "" },
     link: { type: String, trim: true, maxlength: 2000, default: "" },
     image: { type: String, trim: true, maxlength: 2000, default: "" },
+    trad: { type: Boolean, default: false }, // native wear (buba, sokoto, agbada, fila)
     active: { type: Boolean, default: true },
   },
   { timestamps: true },

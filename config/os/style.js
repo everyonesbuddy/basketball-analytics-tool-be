@@ -20,10 +20,16 @@ const COLORS = {
   tan: { name: "Tan", family: "tan", hex: "#c4a57a", neutral: true },
   brown: { name: "Brown", family: "tan", hex: "#6b4a2f" },
   camo: { name: "Camo", family: "camo", hex: "#6b6b4a", neutral: true },
+  // Mostly for native wear
+  cream: { name: "Cream", family: "white", hex: "#efe6d2", neutral: true },
+  wine: { name: "Wine", family: "wine", hex: "#6d1f2c" },
+  emerald: { name: "Emerald", family: "green", hex: "#1f5c45" },
+  gold: { name: "Gold", family: "gold", hex: "#b8913a" },
 };
 
 // Tonal families: the ones the guide builds full-monochrome outfits from.
 const TONAL = {
+  white: { name: "Tonal cream / white", colors: ["white", "cream", "light_grey"], search: "men all white cream native wear" },
   black: { name: "Tonal black", colors: ["black", "charcoal"], search: "tall men all black tonal outfit" },
   grey: { name: "Tonal grey", colors: ["charcoal", "grey", "light_grey"], search: "tall men tonal grey outfit" },
   navy: { name: "Tonal navy", colors: ["navy", "slate", "light_blue"], search: "men tonal navy outfit" },
@@ -64,6 +70,9 @@ const OCCASIONS = {
   work: { name: "Work / office", structures: ["monochrome"], shoe: "black shoe or derby" },
   going_out: { name: "Going out", structures: ["monochrome", "contrast", "neutral_accent"], shoe: "minimal black shoe" },
   street: { name: "Athletic / streetwear", structures: ["neutral_accent", "monochrome"], shoe: "chunky sneaker", chunky: true },
+  // Yoruba traditional. `layer`: none = no outer layer; wear = the agbada is the occasion, not the weather.
+  trad_simple: { name: "Traditional: up & down", structures: ["monochrome", "neutral_accent"], shoe: "leather loafers or slip-ons", trad: true, layer: "none" },
+  trad_agbada: { name: "Traditional: agbada / owambe", structures: ["monochrome", "neutral_accent", "contrast"], shoe: "leather loafers or slip-ons", trad: true, layer: "wear" },
 };
 
 // The guide's example outfits, used when the wardrobe doesn't cover a look yet.
@@ -82,6 +91,18 @@ const LOOKS = [
   { key: "contrast_white_black", structure: "contrast", occasions: ["going_out"], pieces: [["top", "white", "White tee"], ["bottom", "black", "Black jeans"], ["layer", "black", "Black jacket"], ["shoe", "black", "Minimal black shoe"]], search: "men white tee black jeans black jacket outfit" },
   { key: "contrast_black_white", structure: "contrast", occasions: ["going_out"], pieces: [["top", "black", "Black tee"], ["bottom", "white", "White pants"], ["shoe", "black", "Minimal black shoe"]], search: "men black tee white pants outfit" },
   { key: "street_white_bomber", structure: "neutral_accent", occasions: ["street"], pieces: [["top", "white", "White tee"], ["bottom", "black", "Black jeans"], ["layer", "olive", "Bomber"], ["shoe", "white", "Chunky sneaker"]], search: "men streetwear white tee black jeans bomber chunky sneakers" },
+  // Yoruba traditional: buba (top), sokoto (bottom), agbada (the outer layer), fila (cap).
+  { key: "trad_navy_ud", trad: true, name: "Tonal navy up & down", structure: "monochrome", family: "navy", occasions: ["trad_simple"], pieces: [["top", "navy", "Navy buba"], ["bottom", "navy", "Navy sokoto"], ["cap", "navy", "Navy fila"], ["shoe", "black", "Black leather loafers"]], search: "yoruba men navy senator up and down fila" },
+  { key: "trad_black_wine", trad: true, name: "Black up & down, wine fila", structure: "neutral_accent", occasions: ["trad_simple"], pieces: [["top", "black", "Black buba"], ["bottom", "black", "Black sokoto"], ["cap", "wine", "Wine fila"], ["shoe", "black", "Black leather loafers"]], search: "men black native up and down wine fila" },
+  { key: "trad_cream_ud", trad: true, name: "Tonal cream up & down", structure: "monochrome", family: "white", occasions: ["trad_simple"], pieces: [["top", "cream", "Cream buba"], ["bottom", "cream", "Cream sokoto"], ["cap", "cream", "Cream fila"], ["shoe", "brown", "Brown leather loafers"]], search: "men cream native up and down fila" },
+  { key: "trad_olive_ud", trad: true, name: "Tonal olive up & down", structure: "monochrome", family: "olive", occasions: ["trad_simple"], pieces: [["top", "olive", "Olive buba"], ["bottom", "olive", "Olive sokoto"], ["cap", "dark_olive", "Dark olive fila"], ["shoe", "brown", "Brown leather loafers"]], search: "men olive green native wear up and down" },
+  { key: "trad_grey_ud", trad: true, name: "Tonal charcoal up & down", structure: "monochrome", family: "grey", occasions: ["trad_simple"], pieces: [["top", "charcoal", "Charcoal buba"], ["bottom", "charcoal", "Charcoal sokoto"], ["cap", "grey", "Grey fila"], ["shoe", "black", "Black leather loafers"]], search: "men charcoal grey native up and down" },
+  { key: "agbada_navy", trad: true, name: "Tonal navy agbada", structure: "monochrome", family: "navy", occasions: ["trad_agbada"], pieces: [["top", "navy", "Navy buba"], ["bottom", "navy", "Navy sokoto"], ["layer", "navy", "Navy agbada"], ["cap", "navy", "Navy fila"], ["shoe", "black", "Black leather loafers"]], search: "yoruba men navy blue agbada" },
+  { key: "agbada_grey", trad: true, name: "Tonal grey agbada", structure: "monochrome", family: "grey", occasions: ["trad_agbada"], pieces: [["top", "charcoal", "Charcoal buba"], ["bottom", "charcoal", "Charcoal sokoto"], ["layer", "grey", "Grey agbada"], ["cap", "charcoal", "Charcoal fila"], ["shoe", "black", "Black leather loafers"]], search: "men grey agbada" },
+  { key: "agbada_cream_gold", trad: true, name: "Cream agbada, gold fila", structure: "neutral_accent", occasions: ["trad_agbada"], pieces: [["top", "cream", "Cream buba"], ["bottom", "cream", "Cream sokoto"], ["layer", "cream", "Cream agbada"], ["cap", "gold", "Gold aso-oke fila"], ["shoe", "brown", "Brown leather loafers"]], search: "men cream agbada gold aso oke fila" },
+  { key: "agbada_wine_black", trad: true, name: "Wine agbada over black", structure: "neutral_accent", occasions: ["trad_agbada"], pieces: [["top", "black", "Black buba"], ["bottom", "black", "Black sokoto"], ["layer", "wine", "Wine agbada"], ["cap", "wine", "Wine fila"], ["shoe", "black", "Black leather loafers"]], search: "men wine burgundy agbada" },
+  { key: "agbada_emerald", trad: true, name: "Emerald agbada over cream", structure: "neutral_accent", occasions: ["trad_agbada"], pieces: [["top", "cream", "Cream buba"], ["bottom", "cream", "Cream sokoto"], ["layer", "emerald", "Emerald agbada"], ["cap", "emerald", "Emerald fila"], ["shoe", "brown", "Brown leather loafers"]], search: "men emerald green agbada" },
+  { key: "agbada_white_black", trad: true, name: "White set, black agbada", structure: "contrast", occasions: ["trad_agbada"], pieces: [["top", "white", "White buba"], ["bottom", "white", "White sokoto"], ["layer", "black", "Black agbada"], ["cap", "black", "Black fila"], ["shoe", "black", "Black leather loafers"]], search: "men white and black agbada" },
 ];
 
 // The core pieces the guide calls for, for the shopping list. `look` is what to look for.
@@ -108,8 +129,25 @@ const CORE = [
   { key: "derby_black", slot: "shoe", color: "black", name: "Black derby", priority: 3, look: "Sleek, thin sole.", search: "men black derby shoes outfit" },
   { key: "cargo_camo", slot: "bottom", color: "camo", name: "Camo cargo", priority: 3, look: "Straight, not baggy; for streetwear looks.", search: "men camo cargo pants outfit" },
   { key: "chunky_sneaker", slot: "shoe", color: "white", name: "Chunky sneaker (streetwear only)", priority: 3, look: "Only for streetwear fits, worn on purpose.", search: "men chunky sneakers streetwear outfit" },
+  // Traditional (sewn by a tailor). An up & down set counts as its buba (top).
+  { key: "trad_ud_navy", group: "traditional", slot: "top", color: "navy", name: "Navy up & down set", priority: 2, look: "Buba and sokoto in one fabric, sewn to your measurements; straight sokoto, not tapered tight.", search: "yoruba men navy up and down native" },
+  { key: "trad_ud_black", group: "traditional", slot: "top", color: "black", name: "Black up & down set", priority: 2, look: "Pairs with an accent fila (wine or gold).", search: "men black native up and down" },
+  { key: "trad_fila_navy", group: "traditional", slot: "cap", color: "navy", name: "Fila in your set's fabric", priority: 2, look: "Ask the tailor to make one from the leftover fabric.", search: "yoruba fila cap men" },
+  { key: "trad_loafers", group: "traditional", slot: "shoe", color: "black", name: "Black leather loafers or slip-ons", priority: 2, look: "Sleek, thin sole; no bulky sneakers with native.", search: "men black leather loafers native wear" },
+  { key: "trad_agbada_navy", group: "traditional", slot: "layer", color: "navy", name: "Navy agbada (over the navy set)", priority: 3, look: "Full length, clears the ankle; tonal with the set keeps the line.", search: "yoruba men navy agbada" },
+  { key: "trad_ud_cream", group: "traditional", slot: "top", color: "cream", name: "Cream up & down set", priority: 3, look: "Light fabric for hot days and daytime events.", search: "men cream native up and down" },
+  { key: "trad_agbada_cream", group: "traditional", slot: "layer", color: "cream", name: "Cream agbada", priority: 3, look: "Goes over cream or black; finish with a gold aso-oke fila.", search: "men cream agbada" },
+  { key: "trad_fila_accent", group: "traditional", slot: "cap", color: "wine", name: "Accent fila (wine or gold aso-oke)", priority: 3, look: "The one accent on a black or cream set.", search: "aso oke fila men wine gold" },
+];
+
+// Native wear: notes for the traditional occasions.
+const TRAD_NOTES = [
+  "Have it sewn to your measurements: the tailor solves the length problem. Ask for a straight sokoto, and an agbada that clears the ankle.",
+  "Tonal (set, fila and agbada in one color family) keeps the long line, same as everyday wear.",
+  "One accent at most: usually the fila, or the agbada over a neutral set.",
+  "Leather loafers or slip-ons with a thin sole; no sneakers with agbada.",
 ];
 
 const TALL_NOTE = "Shop tall sizes and long inseams; brands with tall ranges save a trip to the tailor. Fit first: sleeve, inseam and hem length matter more than brand.";
 
-module.exports = { COLORS, TONAL, STRUCTURES, SILHOUETTE, OCCASIONS, LOOKS, CORE, TALL_NOTE };
+module.exports = { COLORS, TONAL, STRUCTURES, SILHOUETTE, OCCASIONS, LOOKS, CORE, TALL_NOTE, TRAD_NOTES };

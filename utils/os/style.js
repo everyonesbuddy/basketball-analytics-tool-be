@@ -31,8 +31,11 @@ function layerRule(weather) {
  * Find a wardrobe piece for a slot and color: the exact color first, then the
  * same family (a tonal look only needs the family), never one already used.
  */
-function pick(wardrobe, slot, color, { tonal, used }) {
-  const pool = wardrobe.filter((w) => w.active !== false && w.slot === slot && !used.has(String(w._id)));
+function pick(wardrobe, slot, color, { tonal, used, trad = false }) {
+  // Native pieces only go in native looks (a navy tee isn't a navy buba). Shoes are shared, native-marked ones first.
+  const pool = wardrobe
+    .filter((w) => w.active !== false && w.slot === slot && !used.has(String(w._id)) && (slot === "shoe" || Boolean(w.trad) === trad))
+    .sort((a, b) => (trad ? Number(Boolean(b.trad)) - Number(Boolean(a.trad)) : Number(Boolean(a.trad)) - Number(Boolean(b.trad))));
   const exact = pool.find((w) => w.color === color);
   if (exact) return exact;
   const fam = familyOf(color);
@@ -56,13 +59,15 @@ function lookName(look) {
 function buildOutfit(look, { occasion, weather, wardrobe }) {
   const occ = S.OCCASIONS[occasion];
   const structure = S.STRUCTURES[look.structure];
-  const rule = layerRule(weather);
+  const trad = Boolean(look.trad);
+  // Native looks: the agbada is the occasion, not the weather.
+  const rule = occ.layer === "wear" ? { layer: "wear", why: "Agbada on: it's the occasion, not the weather." } : occ.layer === "none" ? { layer: "skip", why: "Up & down: no outer layer." } : layerRule(weather);
   const used = new Set();
   const notes = [rule.why];
   const pieces = [];
   for (const [slot, color, desc] of look.pieces) {
     if (slot === "layer" && rule.layer === "skip") continue;
-    const item = pick(wardrobe, slot, color, { tonal: look.structure === "monochrome", used });
+    const item = pick(wardrobe, slot, color, { tonal: look.structure === "monochrome", used, trad });
     if (item) used.add(String(item._id));
     const c = S.COLORS[color] || {};
     let text = desc;
@@ -79,11 +84,14 @@ function buildOutfit(look, { occasion, weather, wardrobe }) {
       optional: slot === "layer" && rule.layer === "optional",
     });
   }
-  if (weather?.rain) notes.push("Rain: a clean boot over sneakers.");
-  if (weather && Number.isFinite(weather.tempF) && weather.tempF < COAT_F) {
+  if (trad) {
+    if (weather?.rain) notes.push("Rain: closed leather shoes, and lift the agbada sleeves off the ground.");
+    if (weather && Number.isFinite(weather.tempF) && weather.tempF >= HOT_F) notes.push("Hot: pick the lightest fabric you have (cotton or linen).");
+  } else if (weather?.rain) notes.push("Rain: a clean boot over sneakers.");
+  if (!trad && weather && Number.isFinite(weather.tempF) && weather.tempF < COAT_F) {
     notes.push(look.structure === "monochrome" ? "Cold: a coat in the same color family keeps the line." : "Cold: a cropped jacket or dark coat over it.");
   }
-  if (!occ.chunky) notes.push("Shoes minimal with a thin sole.");
+  if (!occ.chunky && !trad) notes.push("Shoes minimal with a thin sole.");
   const core = pieces.filter((p) => !p.optional);
   return {
     key: look.key,
@@ -148,7 +156,9 @@ function suggestOutfits({ occasion = "everyday", weather = null, wardrobe = [], 
     if (picks.length >= count) break;
     if (!picks.includes(s.outfit)) picks.push(s.outfit);
   }
-  return { occasion: occ, occasionName: S.OCCASIONS[occ].name, shoe: S.OCCASIONS[occ].shoe, layer: layerRule(weather), outfits: picks };
+  const o = S.OCCASIONS[occ];
+  const layer = o.layer === "wear" ? { layer: "wear", why: "Agbada on: it's the occasion, not the weather." } : o.layer === "none" ? { layer: "skip", why: "Up & down: no outer layer." } : layerRule(weather);
+  return { occasion: occ, occasionName: o.name, shoe: o.shoe, trad: Boolean(o.trad), layer, outfits: picks };
 }
 
 /** The guide's core pieces, marked owned or missing, missing and most important first. */
@@ -160,7 +170,8 @@ function gaps({ wardrobe = [] } = {}) {
   const byPriority = [...S.CORE].sort((a, b) => a.priority - b.priority);
   const match = new Map();
   for (const c of byPriority) {
-    const item = active.find((w) => w.slot === c.slot && w.color === c.color && !used.has(String(w._id)));
+    const native = c.group === "traditional";
+    const item = active.find((w) => w.slot === c.slot && w.color === c.color && !used.has(String(w._id)) && Boolean(w.trad) === native);
     if (item) {
       used.add(String(item._id));
       match.set(c.key, item);
@@ -172,7 +183,9 @@ function gaps({ wardrobe = [] } = {}) {
   });
   items.sort((a, b) => Number(a.owned) - Number(b.owned) || a.priority - b.priority);
   const missing = items.filter((i) => !i.owned);
-  return { items, missing: missing.length, owned: items.length - missing.length, next: missing.filter((i) => i.priority === Math.min(...missing.map((m) => m.priority))).slice(0, 3) };
+  // "Buy next" comes from everyday pieces; native pieces have their own list.
+  const main = missing.filter((i) => i.group !== "traditional");
+  return { items, missing: missing.length, owned: items.length - missing.length, next: main.filter((i) => i.priority === Math.min(...main.map((m) => m.priority))).slice(0, 3) };
 }
 
 module.exports = { suggestOutfits, gaps, layerRule, familyOf };

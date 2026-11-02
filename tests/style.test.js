@@ -11,7 +11,7 @@ test("guide is consistent: every look and core piece uses known colors, slots, o
     if (l.structure === "monochrome") assert.ok(S.TONAL[l.family], l.key);
     for (const o of l.occasions) assert.ok(S.OCCASIONS[o], `${l.key} → ${o}`);
     for (const [slot, color] of l.pieces) {
-      assert.ok(["top", "bottom", "layer", "shoe"].includes(slot), l.key);
+      assert.ok(["top", "bottom", "layer", "shoe", "cap"].includes(slot), l.key);
       assert.ok(S.COLORS[color], `${l.key} → ${color}`);
     }
   }
@@ -80,4 +80,28 @@ test("gaps: owned pieces drop off, the next buys are the top-priority missing on
   assert.equal(g1.owned, 6);
   assert.ok(g1.next.every((n) => n.priority === 2));
   assert.equal(g1.items[g1.items.length - 1].owned, true);
+});
+
+test("traditional: up & down has no layer, agbada is always on whatever the weather, native pieces stay native", () => {
+  const simple = st.suggestOutfits({ occasion: "trad_simple", weather: { tempF: 40 }, date: "2026-11-02" });
+  assert.ok(simple.outfits.length >= 2);
+  assert.ok(simple.outfits.every((o) => !o.pieces.some((p) => p.slot === "layer")));
+  assert.ok(simple.outfits.every((o) => o.pieces.some((p) => p.slot === "cap")));
+  const hot = st.suggestOutfits({ occasion: "trad_agbada", weather: { tempF: 92 }, date: "2026-11-02" });
+  assert.ok(hot.outfits.every((o) => o.pieces.some((p) => p.slot === "layer" && !p.optional)));
+  assert.ok(hot.outfits[0].notes.some((n) => /lightest fabric/.test(n)));
+  const kinds = new Set(hot.outfits.map((o) => o.structure));
+  assert.ok(kinds.size >= 2);
+
+  const wardrobe = [W("top", "navy", "Navy tee"), { ...W("top", "navy", "Navy buba"), trad: true }, { ...W("bottom", "navy", "Navy sokoto"), trad: true }, W("shoe", "black", "Black loafers")];
+  const navy = st.suggestOutfits({ occasion: "trad_simple", wardrobe, date: "2026-11-02" }).outfits.find((o) => o.key === "trad_navy_ud");
+  assert.equal(navy.pieces.find((p) => p.slot === "top").item.name, "Navy buba");
+  assert.equal(navy.pieces.find((p) => p.slot === "shoe").item.name, "Black loafers");
+  const everyday = st.suggestOutfits({ occasion: "smart", wardrobe, date: "2026-11-02" });
+  for (const o of everyday.outfits) assert.ok(!o.pieces.some((p) => p.item && /buba|sokoto/i.test(p.item.name)), o.key);
+  // gaps: native pieces only match native items, and "buy next" stays everyday
+  const g = st.gaps({ wardrobe });
+  assert.equal(g.items.find((i) => i.key === "trad_ud_navy").owned, true);
+  assert.equal(g.items.find((i) => i.key === "tee_navy").owned, true);
+  assert.ok(g.next.every((n) => n.group !== "traditional"));
 });
