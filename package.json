@@ -1,5 +1,5 @@
 {
-  "name": "basketball-analytics-tool-be",
+  "name": "personal-os-be",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
@@ -11,7 +11,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Backend scaffold for NBA player analytics and ESPN data aggregation",
+  "description": "Personal OS backend (goals, schedule, gifting, style, events, food, push notifications) plus the original sports tools",
   "engines": {
     "node": "22.x"
   },
@@ -31,6 +31,7 @@
     "mongoose-unique-validator": "^5.0.2",
     "morgan": "^1.11.0",
     "node-cron": "^4.6.0",
-    "validator": "^13.15.35"
+    "validator": "^13.15.35",
+    "web-push": "^3.6.7"
   }
 }

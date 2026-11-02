@@ -7,6 +7,7 @@ const g = require("../controllers/gifting.controller");
 const st = require("../controllers/style.controller");
 const ev = require("../controllers/events.controller");
 const fd = require("../controllers/food.controller");
+const pu = require("../controllers/push.controller");
 
 const router = express.Router();
 
@@ -17,6 +18,9 @@ router.use((req, res, next) => {
 });
 
 router.post("/auth/login", asyncHandler(c.login));
+// Push: the runner (outside pinger, secret key) and notification buttons (action token) don't use the sign-in token.
+router.all("/push/run", asyncHandler(pu.run));
+router.post("/push/action", asyncHandler(pu.action));
 router.use(requireAuth);
 router.get("/auth/me", asyncHandler(c.me));
 router.post("/auth/password", asyncHandler(c.changePassword));
@@ -91,5 +95,14 @@ router.patch("/food/plan/:id", asyncHandler(fd.tickGrocery));
 router.delete("/food/plan/:id", asyncHandler(fd.deletePlan));
 router.post("/food/meals", asyncHandler(fd.addMeal));
 router.delete("/food/meals/:id", asyncHandler(fd.deleteMeal));
+
+// Push notifications
+router.get("/push/key", asyncHandler(pu.key));
+router.post("/push/subscribe", asyncHandler(pu.subscribe));
+router.get("/push/devices", asyncHandler(pu.devices));
+router.delete("/push/devices/:id", asyncHandler(pu.removeDevice));
+router.get("/push/settings", asyncHandler(pu.getSettings));
+router.put("/push/settings", asyncHandler(pu.saveSettings));
+router.post("/push/test", asyncHandler(pu.test));
 
 module.exports = router;

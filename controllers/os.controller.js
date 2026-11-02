@@ -69,19 +69,30 @@ const loadPlanData = async (owner) => {
   return { goals, logs };
 };
 
-exports.today = async (req, res) => {
-  const { goals, logs } = await loadPlanData(req.user.id);
-  const date = today();
-  const reviewDone = await Review.exists({ owner: req.user.id, week: plan.weekOf(date).start });
-  const t = plan.buildToday({ goals, logs, reviewDone: Boolean(reviewDone) });
+/**
+ * Today for one owner: the schedule, focus and attention list, including
+ * gifting, event and meal reminders. Used by the Today page and by push
+ * notifications. `raw` keeps the gift and event reminders with their ids.
+ */
+exports.todayFor = async (owner, at = new Date()) => {
+  const { goals, logs } = await loadPlanData(owner);
+  const date = plan.localParts(at).date;
+  const reviewDone = await Review.exists({ owner, week: plan.weekOf(date).start });
+  const t = plan.buildToday({ goals, logs, at, reviewDone: Boolean(reviewDone) });
   // Gifting reminders that are due soon join the day's decisions.
-  const gifts = (await require("./gifting.controller").remindersFor(req.user.id)).filter((r) => r.priority === 1);
+  const gifts = (await require("./gifting.controller").remindersFor(owner)).filter((r) => r.priority === 1);
   t.attention.push(...gifts.map((r) => ({ kind: "gift", text: r.text })));
   // Shows coming up and tickets going on sale.
-  const shows = await require("./events.controller").remindersFor(req.user.id);
+  const shows = await require("./events.controller").remindersFor(owner);
   t.attention.push(...shows.map((r) => ({ kind: "event", text: r.text })));
-  const meals = await require("./food.controller").remindersFor(req.user.id);
+  const meals = await require("./food.controller").remindersFor(owner);
   t.attention.push(...meals);
+  t.reviewDone = Boolean(reviewDone);
+  return { today: t, raw: { gifts, shows, meals } };
+};
+
+exports.today = async (req, res) => {
+  const { today: t } = await exports.todayFor(req.user.id);
   return res.json({ success: true, ...t, modes: MODES });
 };
 
