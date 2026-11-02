@@ -92,3 +92,28 @@ test("one-tap log: the outcome sets the mode, the block and the next step", asyn
   await c.createLog({ user, body: { goal: gid } }, r);
   assert.equal(r.statusCode, 400);
 });
+
+test("notification button: a valid action token checks in; an expired or wrong one doesn't", async () => {
+  process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret-for-action-tokens";
+  const jwt = require("jsonwebtoken");
+  const pu = require("../controllers/push.controller");
+  const { PushSent } = require("../models/pushModels");
+  PushSent.create = async () => ({});
+  const g = { _id: gid, percent: 0, toolReady: null, toolNeeded: "", nextStep: "", obstacle: { kind: "single" }, save: async () => {} };
+  Goal.findOne = async () => g;
+  let made;
+  GoalLog.create = async (doc) => (made = doc);
+  const token = jwt.sign({ sub: user.id, g: gid, b: "08:30", d: "2026-11-02" }, process.env.JWT_SECRET, { audience: "personal-os-action", expiresIn: "18h" });
+  const r = res();
+  await pu.action({ body: { token, action: "progress" } }, r);
+  assert.equal(r.statusCode, 201);
+  assert.equal(made.outcome, "progress");
+  assert.equal(made.block, "08:30");
+  assert.equal(made.date, "2026-11-02");
+  const bad = res();
+  await pu.action({ body: { token: jwt.sign({ sub: user.id }, process.env.JWT_SECRET, { audience: "personal-os" }), action: "progress" } }, bad);
+  assert.equal(bad.statusCode, 401);
+  const noRun = res();
+  await pu.run({ headers: {}, query: { key: "nope" } }, noRun);
+  assert.equal(noRun.statusCode, 401);
+});

@@ -1183,3 +1183,10 @@ projections are ESPN's public expectations. Results are expected value across ma
 simulated drafts, not a prediction of any single draft. Snake format only.
 
 Default port is `5000`.
+
+## Push notifications (the installed app)
+
+1. Make a key pair once, in this folder: `npx web-push generate-vapid-keys`.
+2. Set config vars (Heroku and `.env`): `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (`mailto:you@example.com`), and `PUSH_CRON_SECRET` (any long random string).
+3. The server checks what's due every 5 minutes while it's awake. So it's on time even when the dyno sleeps, have a free pinger (e.g. cron-job.org) call `https://<your-app>.herokuapp.com/api/os/push/run?key=<PUSH_CRON_SECRET>` every 5 minutes. Each notification is only ever sent once.
+4. On your phone: install the app (iPhone: Safari → Share → Add to Home Screen), open it from the home screen, Settings → Turn on notifications.
