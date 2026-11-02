@@ -74,9 +74,9 @@ async function sendToOwner(owner, payload) {
 }
 
 exports.test = async (req, res) => {
-  if (!push.configured()) return fail(res, 503, "Push isn't set up on the server yet (VAPID keys missing).");
+  if (!push.configured()) return fail(res, 503, "Phone notifications aren't set up on the server yet: add the VAPID keys to the backend's config vars.");
   const r = await sendToOwner(req.user.id, { title: "Personal OS", body: "Notifications are on. You'll get a few useful nudges a day.", url: "/settings", tag: "test" });
-  if (!r.devices) return fail(res, 400, "Turn on notifications on this device first.");
+  if (!r.devices) return fail(res, 400, "Turn on notifications in the installed app on your phone first.");
   return res.json({ success: true, ...r });
 };
 
