@@ -1,3 +1,46 @@
+# Personal OS backend
+
+This backend now runs two things:
+
+- **The personal OS** (`/api/os/...`, signed in): goals and the daily schedule, with more widgets to come (gifting, style, events, travel, money).
+- **The sports tools** (`/api/players`, `/api/teams`, `/api/fantasy`): unchanged, described below.
+
+## Personal OS setup
+
+1. Create a free MongoDB Atlas cluster and copy its connection string.
+2. Set these config vars (Heroku: Settings → Config Vars; locally: `.env`):
+   - `MONGODB_URI`
+   - `JWT_SECRET` (a long random string)
+   - `OS_TIMEZONE` (default `America/New_York`)
+   - `CORS_ORIGINS` (include the website's address)
+3. Create your login: `heroku run node scripts/create-user.js you@example.com "Your Name"`. It prints a one-time password.
+
+Without `MONGODB_URI` the OS answers 503 and the sports tools keep working.
+
+### What the OS does
+
+- **The framework is static** (`config/os/framework.js`): the six categories and their windows, the Mon/Wed/Fri and Tue/Thu schedules, the weekend review, the modes and the quotes.
+- **The rules are pure functions** (`utils/os/plan.js`): today's schedule, the block that's on now, each goal's mode and why (locked → Mode 1; single → Mode 2-Single; tiered → Mode 2-Tiered), the ceiling check (the last 3 tiered sessions earned nothing, or under half the 3 before), and what to do when a window ends.
+- **What you enter**: each goal once (title, outcome, obstacle type, tool ready or what's missing), a quick log per block (mode and % gained, cleared, or tool acquired), and the weekend review.
+
+### Endpoints (all under `/api/os`, Bearer token except login)
+
+| Method | Path | What |
+| --- | --- | --- |
+| POST | `/auth/login` | Sign in (8 wrong tries locks for 30 minutes) |
+| GET | `/auth/me` | Who's signed in |
+| POST | `/auth/password` | Change password (12+ characters) |
+| GET | `/framework` | Categories, schedules, modes, framework text, quotes |
+| GET | `/today` | Today's schedule with each block's goal, mode and reason; what needs attention; quote |
+| GET/POST/PATCH/DELETE | `/goals` | Goals (one active per category) |
+| POST | `/goals/:id/close` | `completed`, `expand` or `rollover` (rollover after a ceiling starts in Mode 1) |
+| GET/POST/DELETE | `/logs` | Block logs; a tiered log adds its % to the goal, a Mode 1 log with the tool acquired unlocks it |
+| GET/POST | `/review` | This week's numbers per goal, and the saved review |
+
+Tests: `npm test`.
+
+---
+
 # Basketball Analytics Tool Backend
 
 This service is the backend API for your NBA dashboard. It pulls data from ESPN, normalizes inconsistent payloads, and returns stable contracts for player and team analytics.
@@ -1140,3 +1183,10 @@ projections are ESPN's public expectations. Results are expected value across ma
 simulated drafts, not a prediction of any single draft. Snake format only.
 
 Default port is `5000`.
+
+## Push notifications (the installed app)
+
+1. Make a key pair once, in this folder: `npx web-push generate-vapid-keys`.
+2. Set config vars (Heroku and `.env`): `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (`mailto:you@example.com`), and `PUSH_CRON_SECRET` (any long random string).
+3. The server checks what's due every 5 minutes while it's awake. So it's on time even when the dyno sleeps, have a free pinger (e.g. cron-job.org) call `https://<your-app>.herokuapp.com/api/os/push/run?key=<PUSH_CRON_SECRET>` every 5 minutes. Each notification is only ever sent once.
+4. On your phone: install the app (iPhone: Safari → Share → Add to Home Screen), open it from the home screen, Settings → Turn on notifications.

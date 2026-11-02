@@ -1,2 +1,7 @@
 /node_modules
 /.env
+# Never commit keys
+desktop
+desktop.pub
+*.pem
+id_*
