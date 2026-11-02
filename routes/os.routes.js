@@ -43,6 +43,7 @@ router.post("/gifting/people", asyncHandler(g.createPerson));
 router.patch("/gifting/people/:id", asyncHandler(g.updatePerson));
 router.delete("/gifting/people/:id", asyncHandler(g.deletePerson));
 router.post("/gifting/people/:id/gifts", asyncHandler(g.logGift));
+router.delete("/gifting/people/:id/gifts/:giftId", asyncHandler(g.deleteGift));
 router.post("/gifting/plans/preview", asyncHandler(g.previewPlan));
 router.post("/gifting/plans", asyncHandler(g.createPlan));
 router.patch("/gifting/plans/:id", asyncHandler(g.updatePlan));

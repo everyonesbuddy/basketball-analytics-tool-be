@@ -51,7 +51,7 @@ exports.overview = async (req, res) => {
     plans: { current, next: plans.find((p) => p.weekStart === nextWeek) || null },
     custom,
     ideas: food.suggestDay({ date, settings, recent, plan: current, custom }),
-    meals: [...F.MEALS, ...custom.map(food.fromCustom)].map((m) => ({ key: m.key, name: m.name, cuisine: m.cuisine, mins: m.mins, mode: m.mode, slots: m.slots, search: m.search, batch: Boolean(m.batch), note: m.note || "", order: m.order || "", link: m.link || "", custom: Boolean(m.custom), orderUrl: food.orderUrl(m) })),
+    meals: [...F.MEALS, ...custom.map(food.fromCustom)].map((m) => ({ key: m.key, name: m.name, cuisine: m.cuisine, mins: m.mins, mode: m.mode, slots: m.slots, search: m.search, batch: Boolean(m.batch), desc: m.desc || "", note: m.note || "", orderNote: m.orderNote || "", order: m.order || "", link: m.link || "", custom: Boolean(m.custom), orderUrl: food.orderUrl(m) })),
     cuisines: F.CUISINES,
     aisles: F.AISLES,
   });

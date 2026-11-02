@@ -78,7 +78,7 @@ test("grocery: cook nights only, merged by item, staples last, ticks kept", () =
   assert.equal(thyme.bought, true);
   assert.equal(g.at(-1).staple, true);
   const plan = food.withLeftovers(days);
-  assert.equal(plan[1].lunch, "Leftovers: Jollof rice with chicken");
+  assert.equal(plan[1].lunch, "Leftovers: Jollof Rice & Chicken");
 });
 
 test("shellfish allergy: the library is shellfish-free, and your own shellfish meals are filtered out", () => {

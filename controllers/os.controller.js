@@ -224,6 +224,7 @@ exports.createLog = async (req, res) => {
   const log = await GoalLog.create({
     owner: req.user.id,
     goal: goal._id,
+    percentBefore: outcome === "cleared" ? goal.percent || 0 : null,
     date: DATE.test(b.date || "") ? b.date : today(),
     block: /^\d{2}:\d{2}$/.test(b.block || "") ? b.block : null,
     outcome,
@@ -257,6 +258,8 @@ exports.deleteLog = async (req, res) => {
   const log = await GoalLog.findOneAndDelete({ _id: req.params.id, owner: req.user.id });
   if (!log) return fail(res, 404, "Not found");
   if (log.percentGained) await Goal.updateOne({ _id: log.goal, owner: req.user.id }, [{ $set: { percent: { $max: [0, { $subtract: ["$percent", log.percentGained] }] } } }]);
+  // Undoing "cleared for the period" puts the % back.
+  if (log.outcome === "cleared" && log.percentBefore !== null && log.percentBefore !== undefined) await Goal.updateOne({ _id: log.goal, owner: req.user.id, status: "active" }, { $set: { percent: log.percentBefore } });
   return res.json({ success: true });
 };
 

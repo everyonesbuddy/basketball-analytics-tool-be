@@ -98,6 +98,14 @@ exports.logGift = async (req, res) => {
   return res.json({ success: true, person });
 };
 
+/** Remove one logged gift. */
+exports.deleteGift = async (req, res) => {
+  if (!isId(req.params.id) || !isId(req.params.giftId)) return fail(res, 404, "Not found");
+  const person = await Person.findOneAndUpdate({ _id: req.params.id, owner: req.user.id }, { $pull: { gifts: { _id: req.params.giftId } } }, { new: true }).lean();
+  if (!person) return fail(res, 404, "Not found");
+  return res.json({ success: true, person });
+};
+
 // ── Plans ───────────────────────────────────────────────────────────────
 
 function cleanInputs(kind, b = {}) {

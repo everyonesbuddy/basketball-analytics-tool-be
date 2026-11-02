@@ -12,6 +12,7 @@ const goalLogSchema = new mongoose.Schema(
     toolAcquired: { type: Boolean, default: false }, // Mode 1: got the tool
     missing: { type: String, trim: true, maxlength: 500, default: "" }, // Mode 1: what's missing
     block: { type: String, match: /^\d{2}:\d{2}$/, default: null }, // which block (start time), when logged from one
+    percentBefore: { type: Number, default: null }, // the goal's % before a "cleared" check-in (restored on undo)
     outcome: { type: String, enum: ["progress", "cleared", "blocked", null], default: null }, // the one-tap result
     note: { type: String, trim: true, maxlength: 2000, default: "" },
   },
