@@ -80,6 +80,8 @@ exports.today = async (req, res) => {
   // Shows coming up and tickets going on sale.
   const shows = await require("./events.controller").remindersFor(req.user.id);
   t.attention.push(...shows.map((r) => ({ kind: "event", text: r.text })));
+  const meals = await require("./food.controller").remindersFor(req.user.id);
+  t.attention.push(...meals);
   return res.json({ success: true, ...t, modes: MODES });
 };
 

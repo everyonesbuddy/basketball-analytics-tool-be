@@ -6,6 +6,7 @@ const c = require("../controllers/os.controller");
 const g = require("../controllers/gifting.controller");
 const st = require("../controllers/style.controller");
 const ev = require("../controllers/events.controller");
+const fd = require("../controllers/food.controller");
 
 const router = express.Router();
 
@@ -75,5 +76,19 @@ router.get("/events/nearby", asyncHandler(ev.nearby));
 router.post("/events/saved", asyncHandler(ev.save));
 router.patch("/events/saved/:id", asyncHandler(ev.updateSaved));
 router.delete("/events/saved/:id", asyncHandler(ev.removeSaved));
+
+// Food
+router.get("/food", asyncHandler(fd.overview));
+router.post("/food/suggest", asyncHandler(fd.suggest));
+router.put("/food/settings", asyncHandler(fd.saveSettings));
+router.post("/food/vote", asyncHandler(fd.vote));
+router.post("/food/ate", asyncHandler(fd.ate));
+router.delete("/food/ate/:id", asyncHandler(fd.unate));
+router.post("/food/plan/preview", asyncHandler(fd.previewPlan));
+router.post("/food/plan", asyncHandler(fd.savePlan));
+router.patch("/food/plan/:id", asyncHandler(fd.tickGrocery));
+router.delete("/food/plan/:id", asyncHandler(fd.deletePlan));
+router.post("/food/meals", asyncHandler(fd.addMeal));
+router.delete("/food/meals/:id", asyncHandler(fd.deleteMeal));
 
 module.exports = router;
