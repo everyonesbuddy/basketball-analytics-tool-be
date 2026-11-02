@@ -80,3 +80,18 @@ test("grocery: cook nights only, merged by item, staples last, ticks kept", () =
   const plan = food.withLeftovers(days);
   assert.equal(plan[1].lunch, "Leftovers: Jollof rice with chicken");
 });
+
+test("shellfish allergy: the library is shellfish-free, and your own shellfish meals are filtered out", () => {
+  assert.deepEqual(F.MEALS.filter(food.mealHasShellfish).map((m) => m.key), []);
+  for (const m of F.MEALS) for (const [name] of m.ing) assert.ok(!/^(shrimp|crayfish|oyster sauce|prawns?)$/i.test(name), `${m.key}: ${name}`);
+  assert.equal(food.hasShellfish("ground crayfish"), true);
+  assert.equal(food.hasShellfish("Periwinkle"), true);
+  assert.equal(food.hasShellfish("smoked fish powder (not crayfish)"), false);
+  assert.equal(food.hasShellfish("salmon fillets"), false);
+  assert.equal(food.hasShellfish("scallions"), false);
+  const custom = [{ _id: "a1", name: "Seafood okra", ingredients: "okra, periwinkle, palm oil" }, { _id: "a2", name: "Mum's fish stew", ingredients: "tilapia, tomatoes, peppers" }];
+  const keys = food.library({ custom }).map((m) => m.key);
+  assert.ok(!keys.includes("c_a1"));
+  assert.ok(keys.includes("c_a2"));
+  assert.ok(food.library({ custom, settings: { noShellfish: false } }).some((m) => m.key === "c_a1"));
+});

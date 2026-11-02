@@ -69,6 +69,7 @@ exports.suggest = async (req, res) => {
 exports.saveSettings = async (req, res) => {
   const b = req.body || {};
   const set = {};
+  if (b.noShellfish !== undefined) set.noShellfish = Boolean(b.noShellfish);
   if (b.tortillas !== undefined) set.tortillas = Boolean(b.tortillas);
   if (["little", "none"].includes(b.sugar)) set.sugar = b.sugar;
   if (Array.isArray(b.cuisines)) set.cuisines = b.cuisines.filter((c) => F.CUISINES.includes(c));
@@ -180,7 +181,10 @@ exports.addMeal = async (req, res) => {
     ingredients: str(b.ingredients, 1000),
     link: /^https?:\/\//i.test(b.link || "") ? str(b.link, 2000) : "",
   });
-  return res.status(201).json({ success: true, meal });
+  // With the shellfish allergy on, a meal with shellfish won't show up in ideas; say so.
+  const settings = { ...food.DEFAULTS, ...(await settingsFor(req.user.id)) };
+  const shellfish = food.mealHasShellfish(food.fromCustom(meal.toObject ? meal.toObject() : meal));
+  return res.status(201).json({ success: true, meal, warning: shellfish && settings.noShellfish ? "Saved, but it has shellfish, so it's hidden from ideas while the shellfish allergy setting is on." : null });
 };
 
 exports.deleteMeal = async (req, res) => {

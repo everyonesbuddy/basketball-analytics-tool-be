@@ -6,7 +6,7 @@ const F = require("../../config/os/food");
 
 const DAY = 86400000;
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const DEFAULTS = { tortillas: true, sugar: "little", cuisines: [], weeknightMax: 45, cookNights: 5, likes: [], dislikes: [] };
+const DEFAULTS = { noShellfish: true, tortillas: true, sugar: "little", cuisines: [], weeknightMax: 45, cookNights: 5, likes: [], dislikes: [] };
 
 function hash(s) {
   let h = 2166136261;
@@ -23,6 +23,21 @@ function weekStartOf(date) {
   const dow = (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7;
   return addDays(date, -dow);
 }
+
+/**
+ * Does this text mention shellfish? Safe swaps written into the library
+ * ("not crayfish", "no shrimp paste", a vegetarian "oyster" sauce, oyster
+ * mushrooms) don't count.
+ */
+function hasShellfish(text) {
+  const t = String(text || "")
+    .toLowerCase()
+    .replace(/\([^)]*\b(not|no|instead of|vegetarian)\b[^)]*\)/g, " ")
+    .replace(/vegetarian '?oyster'? sauce|oyster mushrooms?/g, " ");
+  return F.SHELLFISH.some((w) => new RegExp(`\\b${w}s?\\b`).test(t));
+}
+
+const mealHasShellfish = (meal) => hasShellfish(meal.name) || meal.ing.some(([name]) => hasShellfish(name));
 
 /** A link to order it nearby (Google Maps search; no API needed). */
 const orderUrl = (meal) => `https://www.google.com/maps/search/${encodeURIComponent(`${meal.order || meal.name} near me`)}`;
@@ -54,7 +69,7 @@ function library({ settings = {}, custom = [] } = {}) {
   const dislikes = new Set(s.dislikes || []);
   const cuisines = new Set(s.cuisines || []);
   return [...F.MEALS, ...custom.map(fromCustom)].filter(
-    (meal) => !dislikes.has(meal.key) && (s.tortillas || !meal.tortilla) && (s.sugar !== "none" || meal.sugar === "none") && (!cuisines.size || meal.custom || cuisines.has(meal.cuisine)),
+    (meal) => !dislikes.has(meal.key) && !(s.noShellfish && mealHasShellfish(meal)) && (s.tortillas || !meal.tortilla) && (s.sugar !== "none" || meal.sugar === "none") && (!cuisines.size || meal.custom || cuisines.has(meal.cuisine)),
   );
 }
 
@@ -220,4 +235,4 @@ function groceryFor(days, { custom = [], previous = [] } = {}) {
   return [...items.values()].sort((a, b) => Number(a.staple) - Number(b.staple) || (order.get(a.aisle) ?? 99) - (order.get(b.aisle) ?? 99) || a.name.localeCompare(b.name));
 }
 
-module.exports = { DEFAULTS, library, suggestDay, planWeek, groceryFor, withLeftovers, weekStartOf, addDays, weekdayOf, fromCustom, orderUrl };
+module.exports = { hasShellfish, mealHasShellfish, DEFAULTS, library, suggestDay, planWeek, groceryFor, withLeftovers, weekStartOf, addDays, weekdayOf, fromCustom, orderUrl };

@@ -7,6 +7,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const settingsSchema = new mongoose.Schema(
   {
     owner: { ...owner, unique: true },
+    noShellfish: { type: Boolean, default: true }, // allergy: no shrimp, crab, crayfish…; fish is fine
     tortillas: { type: Boolean, default: true }, // corn tortillas are fine (not "bread")
     sugar: { type: String, enum: ["little", "none"], default: "little" },
     cuisines: [{ type: String, trim: true, maxlength: 40 }], // empty = all
