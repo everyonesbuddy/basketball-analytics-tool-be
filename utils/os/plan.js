@@ -1,8 +1,7 @@
 /**
  * The goal system's rules, as pure functions (no database), so they're easy
- * to test: which schedule today follows, which block is now, which mode each
- * goal is in and why, when a tiered goal has hit its ceiling, and what to do
- * when a window ends.
+ * to test: which schedule today follows, which block is now, what's next,
+ * each goal's window, and what to do when a window ends.
  */
 const { CATEGORIES, SCHEDULES, MODES, QUOTES } = require("../../config/os/framework");
 
@@ -61,60 +60,22 @@ function windowFor(category, start) {
 
 const daysBetween = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / DAY);
 
-/**
- * Ceiling check for a tiered goal: % gains have flattened despite steady
- * sessions. Needs at least 6 tiered sessions; flat when the last 3 earned
- * nothing, or under half of what the 3 before them earned.
- */
-function ceilingCheck(logs = []) {
-  const tiered = logs.filter((l) => l.mode === "m2tiered").sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  if (tiered.length < 6) return { hit: false, sessions: tiered.length };
-  const gain = (xs) => xs.reduce((s, l) => s + (Number(l.percentGained) || 0), 0);
-  const recent = gain(tiered.slice(-3));
-  const before = gain(tiered.slice(-6, -3));
-  const hit = recent === 0 || (before > 0 && recent < before * 0.5);
-  return { hit, sessions: tiered.length, recent: round(recent), before: round(before) };
-}
-
 const round = (n) => Math.round(n * 10) / 10;
 
 const byTime = (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
 
 /**
- * Which mode a goal is in today, and the reason in plain words. The mode is
- * decided block by block ("Do I have what I need today?"), so it follows the
- * latest session logged. A tiered goal whose % has gone flat goes back to
- * Mode 1 (ceiling). With nothing logged yet, it's decided at the first block.
+ * The framework's mode for a goal, as a hint for how to attack it today: a
+ * goal you chip away at (tiered) is Mode 2 in %; otherwise Mode 2, clear it.
+ * Where you actually are on a given day is your call (see the reminders).
  */
-function modeFor(goal, logs = []) {
+function modeFor(goal) {
   if (!goal) return null;
-  const sorted = [...logs].sort(byTime);
-  const last = sorted.at(-1);
-  const missing = (last && last.missing) || goal.toolNeeded;
-  if (!last) {
-    if (goal.toolReady === false && goal.toolNeeded) return { mode: "m1", reason: `Get the tool first: ${goal.toolNeeded}.` };
-    return { mode: null, reason: "Start on the next step. At the end of the block, tap how it went." };
-  }
-  if (last.mode === "m1" && !last.toolAcquired) {
-    return { mode: "m1", reason: missing ? `Get the tool first: ${missing}.` : "Get the tool first: name what's missing, then get it." };
-  }
-  // The tool is in hand: keep attacking the way you last did.
-  const lastAttack = [...sorted].reverse().find((l) => l.mode !== "m1");
-  if (last.mode === "m1" && last.toolAcquired && !lastAttack) {
-    return { mode: null, reason: "You got the tool. Now attack the obstacle: clear it in one go, or chip away." };
-  }
-  if ((lastAttack && lastAttack.mode) === "m2tiered") {
-    const ceiling = ceilingCheck(sorted);
-    if (ceiling.hit) {
-      return {
-        mode: "m1",
-        ceiling,
-        reason: `Ceiling: your last 3 sessions earned ${ceiling.recent}% against ${ceiling.before}% the 3 before. The tool has stopped working; find the next one instead of repeating the same action.`,
-      };
-    }
-    return { mode: "m2tiered", reason: `Chip away: attack today's instance and log the % you earn. ${round(goal.percent || 0)}% so far.` };
-  }
-  return { mode: "m2single", reason: "Clear it: attack the obstacle directly and try to finish it today." };
+  const tiered = goal.obstacle?.kind === "tiered";
+  return {
+    mode: tiered ? "m2tiered" : "m2single",
+    reason: tiered ? `Chip away: clear a % of it today. ${round(goal.percent || 0)}% so far.` : "Start on the next step. At the end of the block, tap how it went.",
+  };
 }
 
 /** Where a goal stands in its window, and what the framework says to do at the end. */
@@ -125,7 +86,7 @@ function windowStatus(goal, today) {
   let next = null;
   if (done && left > 0) next = { scenario: "early", text: "Done early: expand the scope to fill the window, or pull in a related tiered obstacle." };
   else if (left < 0 && done) next = { scenario: "on-time", text: "Window over and goal done: set the next goal and classify its obstacle." };
-  else if (left < 0) next = { scenario: "rollover", text: "Window over and not done: roll it over one full window. If the tool hit a ceiling, start the rollover in Mode 1." };
+  else if (left < 0) next = { scenario: "rollover", text: "Window over and not done: roll it over one full window." };
   return { totalDays: total, daysLeft: Math.max(left, 0), ended: left < 0, done, next };
 }
 
@@ -196,7 +157,7 @@ function buildFocus({ date, minutes, weekday, nowBlock, perGoal, reviewDone, rev
 /**
  * Today: the schedule with each block's goal, mode and reason, the block
  * that's on now and the next goal block, plus anything that needs a decision
- * (a missing goal, a window that ended, a ceiling, the weekly review).
+ * (a missing goal, a window that ended, the weekly review).
  */
 function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), reviewDone = false }) {
   const { date, minutes, weekday } = localParts(at, tz);
@@ -209,7 +170,7 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
   const blockLog = (g, start, firstStart) => logsFor(g).filter((l) => l.date === date && (l.block ? l.block === start : start === firstStart)).sort(byTime).at(-1);
   const loggedBlock = (g, start, firstStart) => Boolean(blockLog(g, start, firstStart));
   // What today's check-in said ("progress", "cleared", "blocked"), for showing it back.
-  const outcomeOf = (l) => (l ? l.outcome || (l.mode === "m1" ? "blocked" : l.cleared ? "cleared" : "progress") : null);
+  const outcomeOf = (l) => (l ? (l.outcome === "cleared" || l.cleared ? "cleared" : "progress") : null);
   const todayLog = (g) => logsFor(g).filter((l) => l.date === date).sort(byTime).at(-1);
   const todayOutcome = (g) => outcomeOf(todayLog(g));
 
@@ -217,7 +178,7 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
   for (const c of CATEGORIES) {
     const g = active.get(c.key);
     if (!g) continue;
-    perGoal.set(c.key, { goal: g, ...modeFor(g, logsFor(g)), window: windowStatus(g, date), loggedToday: loggedToday(g), outcomeToday: todayOutcome(g), logIdToday: todayLog(g)?._id ? String(todayLog(g)._id) : null });
+    perGoal.set(c.key, { goal: g, ...modeFor(g), window: windowStatus(g, date), loggedToday: loggedToday(g), outcomeToday: todayOutcome(g), logIdToday: todayLog(g)?._id ? String(todayLog(g)._id) : null });
   }
 
   const firstStartOf = (cat) => schedule.blocks.find((x) => x.goal === cat)?.start;
@@ -249,7 +210,6 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
       continue;
     }
     if (info.window.next) attention.push({ kind: info.window.next.scenario, category: c.key, goalId: String(info.goal._id), text: `${info.goal.title}: ${info.window.next.text}` });
-    if (info.ceiling?.hit) attention.push({ kind: "ceiling", category: c.key, goalId: String(info.goal._id), text: `${info.goal.title}: ${info.reason}` });
   }
   const reviewBlock = schedule.blocks.find((b) => b.review);
   if (reviewBlock && !reviewDone && minutes >= toMin(reviewBlock.start)) attention.push({ kind: "review", text: "Weekly goal review is due: where each goal stands and the next step for each, so Monday starts itself." });
@@ -276,7 +236,6 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
         mode: info?.mode || null,
         modeName: info ? (info.mode ? MODES[info.mode].name : null) : null,
         reason: info?.reason || null,
-        ceiling: info?.ceiling || null,
         window: info?.window || null,
         loggedToday: info?.loggedToday || false,
         outcomeToday: info?.outcomeToday || null,
@@ -305,7 +264,7 @@ function buildReview({ goals = [], logs = [], date }) {
     .map((g) => {
       const mine = logs.filter((l) => String(l.goal) === String(g._id));
       const week = mine.filter((l) => l.date >= start && l.date <= end);
-      const m = modeFor(g, mine);
+      const m = modeFor(g);
       return {
         goalId: String(g._id),
         category: g.category,
@@ -314,15 +273,13 @@ function buildReview({ goals = [], logs = [], date }) {
         mode: m.mode,
         modeName: m.mode ? MODES[m.mode].name : null,
         reason: m.reason,
+        // Check-ins this week: days you moved it forward, and whether you cleared it.
         sessions: week.length,
-        percentThisWeek: round(week.reduce((s, l) => s + (Number(l.percentGained) || 0), 0)),
-        percentTotal: round(g.percent || 0),
-        cleared: week.some((l) => l.cleared),
-        toolAcquired: week.some((l) => l.toolAcquired),
-        ceiling: m.ceiling || ceilingCheck(mine),
+        daysWorked: new Set(week.map((l) => l.date)).size,
+        cleared: week.some((l) => l.outcome === "cleared" || l.cleared),
         window: windowStatus(g, date),
       };
     });
 }
 
-module.exports = { upcoming, buildFocus, addDays, weekdayOf, localParts, dayType, blockAt, addMonths, windowFor, ceilingCheck, modeFor, windowStatus, buildToday, buildReview, weekOf, quoteFor, toMin };
+module.exports = { upcoming, buildFocus, addDays, weekdayOf, localParts, dayType, blockAt, addMonths, windowFor, modeFor, windowStatus, buildToday, buildReview, weekOf, quoteFor, toMin };

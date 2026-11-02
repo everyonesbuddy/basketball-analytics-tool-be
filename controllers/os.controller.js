@@ -106,8 +106,6 @@ function goalFields(body, { partial = false } = {}) {
   if (!partial || body.title !== undefined) set("title", str(body.title, 200));
   set("outcome", body.outcome === undefined ? undefined : str(body.outcome, 1000));
   set("notes", body.notes === undefined ? undefined : str(body.notes, 4000));
-  set("toolReady", body.toolReady === undefined ? undefined : Boolean(body.toolReady));
-  set("toolNeeded", body.toolNeeded === undefined ? undefined : str(body.toolNeeded, 500));
   set("nextStep", body.nextStep === undefined ? undefined : str(body.nextStep, 500));
   if (body.percent !== undefined) set("percent", Math.max(0, Math.min(100, Number(body.percent) || 0)));
   if (body.obstacle) {
@@ -161,9 +159,8 @@ exports.deleteGoal = async (req, res) => {
 };
 
 /**
- * End a goal's window: completed (optionally expand: keep going with a new
- * end date), or rolled over one full window, starting in Mode 1 if its tool
- * hit a ceiling.
+ * End a goal's window: completed, expand (done early: keep going to the end
+ * of the window), or rolled over one full window.
  */
 exports.closeGoal = async (req, res) => {
   if (!isId(req.params.id)) return fail(res, 404, "Not found");
@@ -184,8 +181,6 @@ exports.closeGoal = async (req, res) => {
     return res.json({ success: true, goal });
   }
   if (outcome === "rollover") {
-    const logs = await GoalLog.find({ goal: goal._id }).lean();
-    const ceiling = goal.obstacle?.kind === "tiered" && plan.ceilingCheck(logs).hit;
     goal.status = "rolled";
     await goal.save();
     const start = new Date(Date.parse(`${goal.windowEnd}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
@@ -196,15 +191,14 @@ exports.closeGoal = async (req, res) => {
       title: goal.title,
       outcome: goal.outcome,
       obstacle: goal.obstacle,
-      toolReady: ceiling ? false : goal.toolReady,
-      toolNeeded: ceiling ? str(req.body?.toolNeeded, 500) || "a new tool to get past the ceiling" : goal.toolNeeded,
-      percent: goal.percent,
+      nextStep: goal.nextStep,
+      percent: goal.percent >= 100 ? 0 : goal.percent,
       notes: goal.notes,
       windowStart: window.start,
       windowEnd: window.end,
       rolledFrom: goal._id,
     });
-    return res.json({ success: true, goal: next, startsIn: ceiling ? "m1" : null });
+    return res.json({ success: true, goal: next });
   }
   return fail(res, 400, "outcome must be completed, expand or rollover");
 };
@@ -219,47 +213,29 @@ exports.listLogs = async (req, res) => {
   return res.json({ success: true, logs });
 };
 
+/**
+ * The check-in at the end of a block: "progress" (moved it forward today) or
+ * "cleared" (cleared the goal for this period, so it's 100% and its next step
+ * is done). Optional nextStep updates the goal's next step.
+ */
 exports.createLog = async (req, res) => {
   const b = req.body || {};
   if (!isId(b.goal)) return fail(res, 400, "Which goal?");
   const goal = await Goal.findOne({ _id: b.goal, owner: req.user.id });
   if (!goal) return fail(res, 404, "Goal not found");
-  // One tap at the end of a block: moved it forward, cleared it, or stuck.
-  // The framework's mode follows from it (stuck = something's missing = Mode 1).
-  const outcome = ["progress", "cleared", "blocked"].includes(b.outcome) ? b.outcome : null;
-  let mode = ["m1", "m2single", "m2tiered"].includes(b.mode) ? b.mode : null;
-  // Moved it forward with a % earned (or on a goal you chip away at) is Mode 2-Tiered.
-  if (!mode && outcome) mode = outcome === "blocked" ? "m1" : outcome === "cleared" ? "m2single" : Number(b.percentGained) > 0 || goal.obstacle?.kind === "tiered" ? "m2tiered" : "m2single";
-  if (!mode) return fail(res, 400, "How did it go?");
-  const percentGained = mode === "m2tiered" ? Math.max(0, Math.min(100, Number(b.percentGained) || 0)) : 0;
+  const outcome = ["progress", "cleared"].includes(b.outcome) ? b.outcome : null;
+  if (!outcome) return fail(res, 400, "Moved it forward, or cleared it?");
   const log = await GoalLog.create({
     owner: req.user.id,
     goal: goal._id,
-    percentBefore: outcome === "cleared" ? goal.percent || 0 : null,
     date: DATE.test(b.date || "") ? b.date : today(),
     block: /^\d{2}:\d{2}$/.test(b.block || "") ? b.block : null,
     outcome,
-    mode,
-    percentGained,
-    cleared: (mode === "m2single" && Boolean(b.cleared)) || outcome === "cleared",
-    toolAcquired: mode === "m1" && Boolean(b.toolAcquired),
-    missing: mode === "m1" ? str(b.missing, 500) : "",
+    percentBefore: outcome === "cleared" ? goal.percent || 0 : null,
     note: str(b.note, 2000),
   });
   if (b.nextStep !== undefined) goal.nextStep = str(b.nextStep, 500);
-  // Cleared the goal entirely for this window: it's done (the window-end choice comes next).
   if (outcome === "cleared") goal.percent = 100;
-  // Keep the goal's state in step with what was logged: the mode is decided
-  // block by block, and the goal remembers the latest answers.
-  if (percentGained) goal.percent = Math.min(100, Math.round(((goal.percent || 0) + percentGained) * 10) / 10);
-  if (mode === "m1") {
-    goal.toolReady = log.toolAcquired;
-    goal.toolNeeded = log.toolAcquired ? "" : log.missing || goal.toolNeeded;
-  } else {
-    goal.toolReady = true;
-    goal.toolNeeded = "";
-    goal.obstacle = { ...(goal.obstacle?.toObject?.() || goal.obstacle || {}), kind: mode === "m2tiered" ? "tiered" : "single" };
-  }
   await goal.save();
   return res.status(201).json({ success: true, log, goal });
 };
@@ -268,8 +244,7 @@ exports.deleteLog = async (req, res) => {
   if (!isId(req.params.id)) return fail(res, 404, "Not found");
   const log = await GoalLog.findOneAndDelete({ _id: req.params.id, owner: req.user.id });
   if (!log) return fail(res, 404, "Not found");
-  if (log.percentGained) await Goal.updateOne({ _id: log.goal, owner: req.user.id }, [{ $set: { percent: { $max: [0, { $subtract: ["$percent", log.percentGained] }] } } }]);
-  // Undoing "cleared for the period" puts the % back.
+  // Undoing "cleared for the period" puts the goal's % back.
   if (log.outcome === "cleared" && log.percentBefore !== null && log.percentBefore !== undefined) await Goal.updateOne({ _id: log.goal, owner: req.user.id, status: "active" }, { $set: { percent: log.percentBefore } });
   return res.json({ success: true });
 };

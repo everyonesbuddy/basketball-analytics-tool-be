@@ -35,62 +35,46 @@ test("new goal gets its category's window", async () => {
   assert.equal(made.obstacle.bounded, false);
 });
 
-test("logging a tiered session adds its %; Mode 1 remembers what's missing; getting it unlocks the goal", async () => {
-  const g = { _id: gid, percent: 10, toolReady: null, toolNeeded: "", obstacle: { kind: "single" }, save: async () => {} };
+test("rolling over starts a fresh window with the same goal and next step", async () => {
+  const g = { _id: gid, owner: user.id, category: "P1", title: "Six pack", status: "active", windowEnd: "2026-11-30", obstacle: { kind: "tiered" }, percent: 40, nextStep: "Add a 4th workout", save: async () => {} };
   Goal.findOne = async () => g;
-  GoalLog.create = async (doc) => doc;
-  const r = res();
-  await c.createLog({ user, body: { goal: gid, mode: "m2tiered", percentGained: 4.5 } }, r);
-  assert.equal(r.statusCode, 201);
-  assert.equal(g.percent, 14.5);
-  assert.equal(g.obstacle.kind, "tiered");
-  assert.equal(g.toolReady, true);
-  await c.createLog({ user, body: { goal: gid, mode: "m1", missing: "a script" } }, res());
-  assert.equal(g.toolReady, false);
-  assert.equal(g.toolNeeded, "a script");
-  await c.createLog({ user, body: { goal: gid, mode: "m1", toolAcquired: true } }, res());
-  assert.equal(g.toolReady, true);
-  assert.equal(g.toolNeeded, "");
-});
-
-test("rolling over after a ceiling starts the next window in Mode 1", async () => {
-  const g = { _id: gid, owner: user.id, category: "P1", title: "Six pack", status: "active", windowEnd: "2026-11-30", obstacle: { kind: "tiered" }, toolReady: true, percent: 40, save: async () => {} };
-  Goal.findOne = async () => g;
-  const flat = [4, 4, 4, 0, 0, 0].map((p, i) => ({ mode: "m2tiered", date: `2026-11-0${i + 1}`, percentGained: p }));
-  GoalLog.find = () => chain(flat);
   let next;
   Goal.create = async (doc) => (next = doc);
   const r = res();
   await c.closeGoal({ user, params: { id: gid }, body: { outcome: "rollover" } }, r);
   assert.equal(g.status, "rolled");
-  assert.equal(next.toolReady, false);
-  assert.equal(r.body.startsIn, "m1");
+  assert.equal(next.title, "Six pack");
+  assert.equal(next.nextStep, "Add a 4th workout");
   assert.equal(next.percent, 40);
+  assert.equal(r.body.startsIn, undefined);
 });
 
-test("one-tap log: the outcome sets the mode, the block and the next step", async () => {
-  const g = { _id: gid, percent: 10, toolReady: null, toolNeeded: "", nextStep: "old", obstacle: { kind: "tiered" }, save: async () => {} };
+test("check-in: moved it forward or cleared it (100%, undo puts the % back), with the block and next step", async () => {
+  const g = { _id: gid, percent: 10, nextStep: "old", obstacle: { kind: "tiered" }, save: async () => {} };
   Goal.findOne = async () => g;
   let made;
   GoalLog.create = async (doc) => (made = doc);
-  await c.createLog({ user, body: { goal: gid, outcome: "progress", block: "08:30", percentGained: 5, nextStep: "Call the next 20" } }, res());
-  assert.equal(made.mode, "m2tiered");
+  await c.createLog({ user, body: { goal: gid, outcome: "progress", block: "08:30", nextStep: "Call the next 20" } }, res());
+  assert.equal(made.outcome, "progress");
   assert.equal(made.block, "08:30");
-  assert.equal(g.percent, 15);
+  assert.equal(g.percent, 10);
   assert.equal(g.nextStep, "Call the next 20");
-  await c.createLog({ user, body: { goal: gid, outcome: "blocked", missing: "a lead list" } }, res());
-  assert.equal(made.mode, "m1");
-  assert.equal(g.toolNeeded, "a lead list");
-  await c.createLog({ user, body: { goal: gid, outcome: "cleared" } }, res());
-  assert.equal(made.mode, "m2single");
-  assert.equal(made.cleared, true);
+  await c.createLog({ user, body: { goal: gid, outcome: "cleared", nextStep: "" } }, res());
+  assert.equal(made.outcome, "cleared");
+  assert.equal(made.percentBefore, 10);
   assert.equal(g.percent, 100);
-  g.obstacle.kind = "single";
-  await c.createLog({ user, body: { goal: gid, outcome: "progress", percentGained: 3 } }, res());
-  assert.equal(made.mode, "m2tiered");
-  const r = res();
-  await c.createLog({ user, body: { goal: gid } }, r);
-  assert.equal(r.statusCode, 400);
+  assert.equal(g.nextStep, "");
+  for (const body of [{ goal: gid }, { goal: gid, outcome: "blocked" }, { goal: gid, mode: "m1" }]) {
+    const r = res();
+    await c.createLog({ user, body }, r);
+    assert.equal(r.statusCode, 400);
+  }
+  // undo the cleared check-in
+  let restored;
+  GoalLog.findOneAndDelete = async () => ({ goal: gid, outcome: "cleared", percentBefore: 10 });
+  Goal.updateOne = async (_q, u) => (restored = u);
+  await c.deleteLog({ user, params: { id: "64b0000000000000000000bb" } }, res());
+  assert.deepEqual(restored, { $set: { percent: 10 } });
 });
 
 test("notification button: a valid action token checks in; an expired or wrong one doesn't", async () => {
