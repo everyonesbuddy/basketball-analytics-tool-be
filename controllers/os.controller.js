@@ -106,7 +106,6 @@ function goalFields(body, { partial = false } = {}) {
   if (!partial || body.title !== undefined) set("title", str(body.title, 200));
   set("outcome", body.outcome === undefined ? undefined : str(body.outcome, 1000));
   set("notes", body.notes === undefined ? undefined : str(body.notes, 4000));
-  set("nextStep", body.nextStep === undefined ? undefined : str(body.nextStep, 500));
   if (body.percent !== undefined) set("percent", Math.max(0, Math.min(100, Number(body.percent) || 0)));
   if (body.obstacle) {
     const kind = body.obstacle.kind === "tiered" ? "tiered" : "single";
@@ -191,7 +190,6 @@ exports.closeGoal = async (req, res) => {
       title: goal.title,
       outcome: goal.outcome,
       obstacle: goal.obstacle,
-      nextStep: goal.nextStep,
       percent: goal.percent >= 100 ? 0 : goal.percent,
       notes: goal.notes,
       windowStart: window.start,
@@ -214,9 +212,8 @@ exports.listLogs = async (req, res) => {
 };
 
 /**
- * The check-in at the end of a block: "progress" (moved it forward today) or
- * "cleared" (cleared the goal for this period, so it's 100% and its next step
- * is done). Optional nextStep updates the goal's next step.
+ * The check-in at the end of a block, and the only one there is: "progress"
+ * (moved it forward today) or "cleared" (cleared the goal for this period).
  */
 exports.createLog = async (req, res) => {
   const b = req.body || {};
@@ -234,7 +231,6 @@ exports.createLog = async (req, res) => {
     percentBefore: outcome === "cleared" ? goal.percent || 0 : null,
     note: str(b.note, 2000),
   });
-  if (b.nextStep !== undefined) goal.nextStep = str(b.nextStep, 500);
   if (outcome === "cleared") goal.percent = 100;
   await goal.save();
   return res.status(201).json({ success: true, log, goal });
@@ -265,13 +261,11 @@ exports.saveReview = async (req, res) => {
   const entries = (Array.isArray(req.body?.entries) ? req.body.entries : [])
     .filter((e) => isId(e.goal))
     .slice(0, 12)
-    .map((e) => ({ goal: e.goal, nextAction: str(e.nextAction, 1000), mode: ["m1", "m2single", "m2tiered"].includes(e.mode) ? e.mode : undefined }));
+    .map((e) => ({ goal: e.goal, mode: ["m1", "m2single", "m2tiered"].includes(e.mode) ? e.mode : undefined }));
   const review = await Review.findOneAndUpdate(
     { owner: req.user.id, week },
     { $set: { entries, notes: str(req.body?.notes, 4000) } },
     { upsert: true, new: true, runValidators: true },
   ).lean();
-  // The review's next actions become each goal's next step, so the next block starts itself.
-  await Promise.all(entries.filter((e) => e.nextAction).map((e) => Goal.updateOne({ _id: e.goal, owner: req.user.id }, { $set: { nextStep: e.nextAction.slice(0, 500) } })));
   return res.json({ success: true, review });
 };

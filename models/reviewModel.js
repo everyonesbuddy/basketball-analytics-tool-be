@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-// The weekend review: one per week, with next actions per goal.
+// The weekend review: one per week, with notes.
 const reviewSchema = new mongoose.Schema(
   {
     owner: { type: mongoose.Schema.Types.ObjectId, ref: "OsUser", required: true, index: true },
@@ -8,7 +8,6 @@ const reviewSchema = new mongoose.Schema(
     entries: [
       {
         goal: { type: mongoose.Schema.Types.ObjectId, ref: "OsGoal" },
-        nextAction: { type: String, trim: true, maxlength: 1000, default: "" },
         mode: { type: String, enum: ["m1", "m2single", "m2tiered"] },
       },
     ],

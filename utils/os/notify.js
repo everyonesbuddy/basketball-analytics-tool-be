@@ -2,7 +2,7 @@
  * Which push notifications are due right now, as a pure function. A few
  * useful nudges a day, never noise:
  *  - brief:   morning brief at your chosen time
- *  - blocks:  when a goal block starts (with its next step)
+ *  - blocks:  when a goal block starts
  *  - checkin: when a goal block ends and you haven't checked in (with buttons)
  *  - review:  weekly review at its slot, and Sunday evening if still not done
  *  - meals:   tonight's planned dinner in the afternoon; weekend "plan next week"
@@ -70,14 +70,14 @@ function dueNotifications({ today, minutes, raw = {}, dinner = null, settings = 
     const body =
       today.dayType === "weekend"
         ? ["Weekend: free time, weekly review at 2:00 PM.", ...extras].join("\n")
-        : [first ? `First up ${clock(first.start)}: ${first.goalTitle}${first.nextStep ? ` → ${first.nextStep}` : ""}` : "No goal blocks set yet.", ...extras].join("\n");
+        : [first ? `First up ${clock(first.start)}: ${first.goalTitle}` : "No goal blocks set yet.", ...extras].join("\n");
     add({ key: `brief:${date}`, kind: "brief", title: `Good morning. ${LONG_DAY[today.weekday] || today.weekday}'s plan`, body });
   }
 
   for (const b of today.blocks) {
     if (!b.category || !b.goalId) continue;
     if (s.blocks && justNow(minutes, b.start, window) && !b.loggedToday) {
-      add({ key: `block:${date}:${b.start}`, kind: "blocks", title: `Now: ${b.category} · ${b.goalTitle}`, body: b.nextStep ? `Next step: ${b.nextStep}` : `Until ${clock(b.end)}. Pick the smallest next step and start.`, tag: `block-${b.start}` });
+      add({ key: `block:${date}:${b.start}`, kind: "blocks", title: `Now: ${b.category} · ${b.goalTitle}`, body: `Until ${clock(b.end)}. Move it forward.`, tag: `block-${b.start}` });
     }
     if (s.checkin && justNow(minutes, b.end === "24:00" ? "23:59" : b.end, window) && !b.loggedToday) {
       add({
@@ -97,8 +97,8 @@ function dueNotifications({ today, minutes, raw = {}, dinner = null, settings = 
 
   if (s.review && !today.reviewDone) {
     const rb = today.blocks.find((b) => b.review);
-    if (rb && justNow(minutes, rb.start, window)) add({ key: `review:${date}`, kind: "review", title: "Weekly review: 30 minutes", body: "Where each goal stands and the next step for each, so Monday starts itself.", url: "/review" });
-    if (today.weekday === "Sun" && justNow(minutes, "18:00", window)) add({ key: `review-late:${date}`, kind: "review", title: "Weekly review is still due", body: "Do it before Monday so every goal has its next step.", url: "/review" });
+    if (rb && justNow(minutes, rb.start, window)) add({ key: `review:${date}`, kind: "review", title: "Weekly review: 30 minutes", body: "Where each goal stands this week, and anything to adjust.", url: "/review" });
+    if (today.weekday === "Sun" && justNow(minutes, "18:00", window)) add({ key: `review-late:${date}`, kind: "review", title: "Weekly review is still due", body: "30 minutes before Monday: where each goal stands this week.", url: "/review" });
   }
 
   if (s.meals) {
