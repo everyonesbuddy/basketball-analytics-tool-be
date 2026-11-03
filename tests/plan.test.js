@@ -37,7 +37,7 @@ test("windows: each category's length, month ends clamp", () => {
 
 test("mode is a hint from the goal: chip-away goals are Mode 2 in %, others Mode 2 clear it", () => {
   assert.equal(plan.modeFor(goal()).mode, "m2single");
-  assert.match(plan.modeFor(goal()).reason, /Start on the next step/);
+  assert.match(plan.modeFor(goal()).reason, /Work on it/);
   const tiered = plan.modeFor(goal({ obstacle: { kind: "tiered" }, percent: 20 }));
   assert.equal(tiered.mode, "m2tiered");
   assert.match(tiered.reason, /20% so far/);
@@ -52,16 +52,16 @@ test("window end: early, on time, roll over", () => {
   assert.equal(plan.windowStatus(goal(), "2026-11-20").daysLeft, 10);
 });
 
-test("today: the block that is on now, its goal and next step, and what needs attention", () => {
+test("today: the block that is on now, its goal, and what needs attention", () => {
   // Wednesday Nov 4 2026, 9:00 a.m. New York: v1, PF1 block 1.
   const at = new Date("2026-11-04T14:00:00Z");
-  const goals = [goal(), goal({ _id: "g2", category: "PF1", title: "Basketball software job", nextStep: "Finish the portfolio project" })];
+  const goals = [goal(), goal({ _id: "g2", category: "PF1", title: "Basketball software job" })];
   const logs = [{ goal: "g2", date: "2026-11-03", outcome: "progress" }];
   const t = plan.buildToday({ goals, logs, at, tz: "America/New_York" });
   assert.equal(t.date, "2026-11-04");
   assert.equal(t.dayType, "v1");
   assert.equal(t.now.category, "PF1");
-  assert.equal(t.now.nextStep, "Finish the portfolio project");
+  assert.equal(t.now.nextStep, undefined);
   assert.equal(t.now.loggedToday, false);
   assert.equal(t.nextGoalBlock.category, "PF1"); // block 2 after lunch
   assert.equal(t.attention.filter((a) => a.kind === "missing").length, 4);
@@ -96,8 +96,8 @@ test("review: this week's check-ins per goal, days worked, and whether it was cl
 
 test("focus: always one answer, and what's next across days", () => {
   const goals = [
-    { _id: "g1", category: "P1", title: "Run 5k under 25", status: "active", windowStart: "2026-10-01", windowEnd: "2026-10-31", obstacle: { kind: "tiered" }, percent: 20, nextStep: "Intervals 6x400" },
-    { _id: "g2", category: "PF1", title: "Ship v2", status: "active", windowStart: "2026-10-01", windowEnd: "2027-03-31", obstacle: { kind: "single" }, nextStep: "" },
+    { _id: "g1", category: "P1", title: "Run 5k under 25", status: "active", windowStart: "2026-10-01", windowEnd: "2026-10-31", obstacle: { kind: "tiered" }, percent: 20 },
+    { _id: "g2", category: "PF1", title: "Ship v2", status: "active", windowStart: "2026-10-01", windowEnd: "2027-03-31", obstacle: { kind: "single" } },
   ];
   const tz = "America/New_York";
   const at = (iso, extra = {}) => plan.buildToday({ goals, logs: [], at: new Date(iso), tz, ...extra }).focus;
@@ -114,11 +114,10 @@ test("focus: always one answer, and what's next across days", () => {
   assert.equal(f.next.day, "Today");
   assert.equal(f.next.start, "14:00");
 
-  // Review done: next skips it and lands on Monday's first goal block with its next step
+  // Review done: next skips it and lands on Monday's first goal block
   f = at("2026-11-01T03:26:00-05:00", { reviewDone: true });
   assert.equal(f.next.day, "Tomorrow");
   assert.equal(f.next.goalTitle, "Run 5k under 25");
-  assert.equal(f.next.nextStep, "Intervals 6x400");
 
   // Sunday after the slot, not done: still due
   assert.equal(at("2026-11-01T16:00:00-05:00").state, "review");
@@ -128,7 +127,6 @@ test("focus: always one answer, and what's next across days", () => {
   f = at("2026-11-02T06:20:00-05:00");
   assert.equal(f.state, "goal");
   assert.equal(f.block.goalTitle, "Run 5k under 25");
-  assert.equal(f.block.nextStep, "Intervals 6x400");
   assert.equal(f.next.goalTitle, "Ship v2");
   f = at("2026-11-02T07:10:00-05:00");
   assert.equal(f.state, "break");

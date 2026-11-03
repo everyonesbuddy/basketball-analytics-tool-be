@@ -74,7 +74,7 @@ function modeFor(goal) {
   const tiered = goal.obstacle?.kind === "tiered";
   return {
     mode: tiered ? "m2tiered" : "m2single",
-    reason: tiered ? `Chip away: clear a % of it today. ${round(goal.percent || 0)}% so far.` : "Start on the next step. At the end of the block, tap how it went.",
+    reason: tiered ? `Chip away: clear a % of it today. ${round(goal.percent || 0)}% so far.` : "Work on it. At the end of the block, tap how it went.",
   };
 }
 
@@ -125,7 +125,6 @@ function upcoming({ date, minutes, perGoal, reviewDone }) {
         category: b.goal || null,
         goalId: info ? String(info.goal._id) : null,
         goalTitle: info?.goal.title || null,
-        nextStep: info?.goal.nextStep || "",
         minutesAway: i * 1440 + toMin(b.start) - minutes,
       };
     }
@@ -144,10 +143,10 @@ function buildFocus({ date, minutes, weekday, nowBlock, perGoal, reviewDone, rev
   if (nowBlock?.category) {
     return { ...base, state: "goal", block: nowBlock, text: nowBlock.goalTitle ? `Work on: ${nowBlock.goalTitle}` : `${nowBlock.label}: no goal set yet. Set one and use this block.` };
   }
-  if (nowBlock?.review && !reviewDone) return { ...base, state: "review", block: nowBlock, text: "Weekly review: 30 minutes. Where each goal stands and the next step for each." };
+  if (nowBlock?.review && !reviewDone) return { ...base, state: "review", block: nowBlock, text: "Weekly review: 30 minutes. Where each goal stands this week." };
   // Review slot passed and not done: on Sunday it's still due before Monday.
   if (reviewBlock && !reviewDone && weekday === "Sun" && minutes >= toMin(reviewBlock.end)) {
-    return { ...base, state: "review", block: null, text: "The weekly review is still due. Do it before Monday so each goal has its next step." };
+    return { ...base, state: "review", block: null, text: "The weekly review is still due. Do it before Monday." };
   }
   if (nowBlock && nowBlock.label !== "Free time") return { ...base, state: "break", block: nowBlock, text: `${nowBlock.label} until the next block.` };
   if (nowBlock) return { ...base, state: "free", block: nowBlock, text: "Free time. Nothing scheduled right now." };
@@ -194,7 +193,6 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
       mode: info?.mode || null,
       modeName: info ? (info.mode ? MODES[info.mode].name : null) : null,
       reason: info?.reason || (b.goal ? "No active goal in this category yet." : null),
-      nextStep: info?.goal.nextStep || "",
       tiered: info?.goal.obstacle?.kind === "tiered",
       loggedToday: info ? loggedBlock(info.goal, b.start, firstStartOf(b.goal)) : false,
       outcomeToday: info ? outcomeOf(blockLog(info.goal, b.start, firstStartOf(b.goal))) : null,
@@ -212,7 +210,7 @@ function buildToday({ goals = [], logs = [], at = new Date(), tz = zone(), revie
     if (info.window.next) attention.push({ kind: info.window.next.scenario, category: c.key, goalId: String(info.goal._id), text: `${info.goal.title}: ${info.window.next.text}` });
   }
   const reviewBlock = schedule.blocks.find((b) => b.review);
-  if (reviewBlock && !reviewDone && minutes >= toMin(reviewBlock.start)) attention.push({ kind: "review", text: "Weekly goal review is due: where each goal stands and the next step for each, so Monday starts itself." });
+  if (reviewBlock && !reviewDone && minutes >= toMin(reviewBlock.start)) attention.push({ kind: "review", text: "Weekly goal review is due: where each goal stands this week." });
 
   const now = blockAt(schedule.blocks, minutes);
   const nextGoalBlock = blocks.find((b) => b.category && !b.past && !b.now) || null;
@@ -269,7 +267,6 @@ function buildReview({ goals = [], logs = [], date }) {
         goalId: String(g._id),
         category: g.category,
         title: g.title,
-        nextStep: g.nextStep || "",
         mode: m.mode,
         modeName: m.mode ? MODES[m.mode].name : null,
         reason: m.reason,

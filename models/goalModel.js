@@ -19,7 +19,6 @@ const goalSchema = new mongoose.Schema(
       parallel: { type: Boolean, default: null }, // tiered only: several instances at once
     },
     percent: { type: Number, min: 0, max: 100, default: 0 }, // 100 once cleared for the period
-    nextStep: { type: String, trim: true, maxlength: 500, default: "" }, // what to do at the next block
     notes: { type: String, trim: true, maxlength: 4000, default: "" },
     rolledFrom: { type: mongoose.Schema.Types.ObjectId, ref: "OsGoal", default: null },
     completedAt: { type: Date, default: null },

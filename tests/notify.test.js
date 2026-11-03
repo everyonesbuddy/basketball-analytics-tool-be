@@ -5,8 +5,8 @@ const notify = require("../utils/os/notify");
 
 const tz = "America/New_York";
 const goals = [
-  { _id: "g1", category: "P1", title: "Run a 5k under 25", status: "active", windowStart: "2026-10-01", windowEnd: "2026-10-31", obstacle: { kind: "tiered" }, percent: 20, nextStep: "Intervals 6x400" },
-  { _id: "g2", category: "PF1", title: "Sign 3 facilities", status: "active", windowStart: "2026-10-01", windowEnd: "2027-03-31", obstacle: { kind: "single" }, nextStep: "Follow up with 4 leads" },
+  { _id: "g1", category: "P1", title: "Run a 5k under 25", status: "active", windowStart: "2026-10-01", windowEnd: "2026-10-31", obstacle: { kind: "tiered" }, percent: 20 },
+  { _id: "g2", category: "PF1", title: "Sign 3 facilities", status: "active", windowStart: "2026-10-01", windowEnd: "2027-03-31", obstacle: { kind: "single" } },
 ];
 const at = (iso, logs = [], reviewDone = false) => {
   const now = new Date(iso);
@@ -15,21 +15,22 @@ const at = (iso, logs = [], reviewDone = false) => {
 };
 const keys = (list) => list.map((n) => n.key);
 
-test("morning brief at the chosen time, with the first block, its next step and tonight's dinner", () => {
+test("morning brief at the chosen time, with the first block and tonight's dinner", () => {
   const n = notify.dueNotifications({ ...at("2026-11-02T06:03:00-05:00"), dinner: { name: "Jollof Rice & Chicken", mode: "cook" } });
   const brief = n.find((x) => x.kind === "brief");
   assert.ok(brief);
   assert.match(brief.title, /Monday/);
-  assert.match(brief.body, /6:15 AM: Run a 5k under 25 → Intervals 6x400/);
+  assert.match(brief.body, /6:15 AM: Run a 5k under 25$/m);
+  assert.doesNotMatch(brief.body, /Intervals/, "no next steps");
   assert.match(brief.body, /Dinner: Jollof/);
   assert.ok(!notify.dueNotifications({ ...at("2026-11-02T06:03:00-05:00"), settings: { brief: false } }).some((x) => x.kind === "brief"));
 });
 
-test("block start with the next step; block end check-in with buttons; nothing once checked in", () => {
+test("block start; block end check-in with buttons; nothing once checked in", () => {
   const start = notify.dueNotifications(at("2026-11-02T08:31:00-05:00"));
   const b = start.find((x) => x.kind === "blocks");
   assert.equal(b.title, "Now: PF1 · Sign 3 facilities");
-  assert.equal(b.body, "Next step: Follow up with 4 leads");
+  assert.match(b.body, /^Until \d{1,2}:\d{2} [AP]M\. Move it forward\.$/);
   const end = notify.dueNotifications(at("2026-11-02T07:02:00-05:00"));
   const c = end.find((x) => x.kind === "checkin");
   assert.equal(c.checkin.goalId, "g1");

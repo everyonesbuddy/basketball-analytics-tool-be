@@ -35,8 +35,8 @@ test("new goal gets its category's window", async () => {
   assert.equal(made.obstacle.bounded, false);
 });
 
-test("rolling over starts a fresh window with the same goal and next step", async () => {
-  const g = { _id: gid, owner: user.id, category: "P1", title: "Six pack", status: "active", windowEnd: "2026-11-30", obstacle: { kind: "tiered" }, percent: 40, nextStep: "Add a 4th workout", save: async () => {} };
+test("rolling over starts a fresh window with the same goal", async () => {
+  const g = { _id: gid, owner: user.id, category: "P1", title: "Six pack", status: "active", windowEnd: "2026-11-30", obstacle: { kind: "tiered" }, percent: 40, save: async () => {} };
   Goal.findOne = async () => g;
   let next;
   Goal.create = async (doc) => (next = doc);
@@ -44,26 +44,25 @@ test("rolling over starts a fresh window with the same goal and next step", asyn
   await c.closeGoal({ user, params: { id: gid }, body: { outcome: "rollover" } }, r);
   assert.equal(g.status, "rolled");
   assert.equal(next.title, "Six pack");
-  assert.equal(next.nextStep, "Add a 4th workout");
+  assert.equal(next.nextStep, undefined);
   assert.equal(next.percent, 40);
   assert.equal(r.body.startsIn, undefined);
 });
 
-test("check-in: moved it forward or cleared it (100%, undo puts the % back), with the block and next step", async () => {
-  const g = { _id: gid, percent: 10, nextStep: "old", obstacle: { kind: "tiered" }, save: async () => {} };
+test("check-in: moved it forward or cleared it (100%, undo puts the % back), with the block", async () => {
+  const g = { _id: gid, percent: 10, obstacle: { kind: "tiered" }, save: async () => {} };
   Goal.findOne = async () => g;
   let made;
   GoalLog.create = async (doc) => (made = doc);
-  await c.createLog({ user, body: { goal: gid, outcome: "progress", block: "08:30", nextStep: "Call the next 20" } }, res());
+  await c.createLog({ user, body: { goal: gid, outcome: "progress", block: "08:30", nextStep: "ignored" } }, res());
   assert.equal(made.outcome, "progress");
   assert.equal(made.block, "08:30");
   assert.equal(g.percent, 10);
-  assert.equal(g.nextStep, "Call the next 20");
-  await c.createLog({ user, body: { goal: gid, outcome: "cleared", nextStep: "" } }, res());
+  assert.equal(g.nextStep, undefined, "check-ins are only moved forward or cleared");
+  await c.createLog({ user, body: { goal: gid, outcome: "cleared" } }, res());
   assert.equal(made.outcome, "cleared");
   assert.equal(made.percentBefore, 10);
   assert.equal(g.percent, 100);
-  assert.equal(g.nextStep, "");
   for (const body of [{ goal: gid }, { goal: gid, outcome: "blocked" }, { goal: gid, mode: "m1" }]) {
     const r = res();
     await c.createLog({ user, body }, r);
@@ -83,7 +82,7 @@ test("notification button: a valid action token checks in; an expired or wrong o
   const pu = require("../controllers/push.controller");
   const { PushSent } = require("../models/pushModels");
   PushSent.create = async () => ({});
-  const g = { _id: gid, percent: 0, toolReady: null, toolNeeded: "", nextStep: "", obstacle: { kind: "single" }, save: async () => {} };
+  const g = { _id: gid, percent: 0, toolReady: null, toolNeeded: "", obstacle: { kind: "single" }, save: async () => {} };
   Goal.findOne = async () => g;
   let made;
   GoalLog.create = async (doc) => (made = doc);
