@@ -62,34 +62,37 @@ test("care: due weekly and monthly from the last one done; a plan holds it", () 
   assert.equal(planned.big.planned.on, "2026-11-23");
 });
 
-test("gift circle: longest since a gift goes first, never-gifted before that; spouse and skipped people wait", () => {
-  const people = [
-    { _id: "wife", name: "Ada", relationship: "wife", gifts: [] },
-    { _id: "uncle", name: "Uncle Tunde", relationship: "uncle", tier: "thoughtful", gifts: [{ date: daysAgo(200) }] },
-    { _id: "mum", name: "Mum", relationship: "mother", tier: "close", gifts: [{ date: daysAgo(20) }] },
-    { _id: "gma", name: "Grandma", relationship: "grandmother", tier: "close", gifts: [] },
-    { _id: "friend", name: "Seyi", relationship: "friend", tier: "casual", gifts: [] },
-    { _id: "boss", name: "Boss", relationship: "colleague", inCircle: false, gifts: [] },
+test("gift circle goes by kind of person: never-gifted kinds first, then longest since; skipped kinds wait; no people needed", () => {
+  const prefs = { circleBudget: 50, circleRelationships: ["mother", "uncle", "friend", "grandmother", "wife"] };
+  const log = [
+    { kind: "circle", relationship: "mother", status: "done", date: daysAgo(20) },
+    { kind: "circle", relationship: "uncle", status: "done", date: daysAgo(200) },
+    { kind: "circle", relationship: "friend", status: "skipped", date: daysAgo(2) },
   ];
-  const log = [{ kind: "circle", personId: "friend", status: "skipped", date: daysAgo(2) }];
-  const c = care.circle({ people, log, today: TODAY, prefs: { spouseId: "wife", circleBudget: 50 } });
-  const order = c.next.map((n) => n.personId);
-  assert.equal(order[0], "gma", "never gifted first");
-  assert.ok(!order.includes("wife") && !order.includes("boss"), "not the spouse; not someone taken out of the circle");
-  assert.ok(order.indexOf("uncle") < order.indexOf("mum"), "200 days before 20 days");
-  assert.equal(order.at(-1), "friend", "skipped recently goes to the back");
-  assert.equal(c.due, true, "never done a circle gift: due");
+  const c = care.circle({ log, today: TODAY, prefs });
+  const order = c.next.map((n) => n.relationship);
+  assert.deepEqual(order, ["grandmother", "uncle", "mother", "friend"], "never gifted, then 200 days, then 20 days; skipped last; never the wife");
+  assert.equal(c.next[0].phrase, "a grandma");
+  assert.equal(c.next[1].name, "Uncle");
   assert.ok(c.next[0].hamper.total <= 50, "hamper fits the budget");
-  assert.equal(c.next[1].hamper.name, "Grooming and gadget", "uncle gets an uncle hamper");
+  assert.equal(c.next[1].hamper.name, "Grooming and gadget", "an uncle gets an uncle hamper");
+  assert.equal(c.eligible, 4);
 });
 
-test("gift circle: due again after the interval from the last circle gift", () => {
+test("gift circle: due again after the interval; old entries tied to a person count for their kind; the order holds day to day", () => {
   const people = [{ _id: "mum", name: "Mum", relationship: "mother", gifts: [] }];
   const log = [{ kind: "circle", personId: "mum", status: "done", date: daysAgo(10) }];
-  const c = care.circle({ people, log, today: TODAY, prefs: { circleEveryDays: 45 } });
+  const c = care.circle({ people, log, today: TODAY, prefs: { circleEveryDays: 45 }, count: 20 });
   assert.equal(c.due, false);
   assert.equal(c.nextOn, "2026-12-26");
-  assert.equal(c.next[0].last, "2026-11-11", "a done circle gift counts as their last gift");
+  assert.equal(c.next.find((n) => n.relationship === "mother").last, "2026-11-11", "the old person entry counts for mothers");
+  assert.notEqual(c.next[0].relationship, "mother");
+  const tomorrow = care.circle({ people, log, today: "2026-11-22", prefs: { circleEveryDays: 45 }, count: 20 });
+  assert.deepEqual(tomorrow.next.map((n) => n.relationship), c.next.map((n) => n.relationship), "same order tomorrow");
+
+  const first = care.circle({ log: [], today: TODAY, prefs: {} });
+  assert.equal(first.due, true, "never done a circle gift: due");
+  assert.ok(first.eligible >= 10, "the default circle covers family and friends");
 });
 
 test("new relationships work in the hamper builder (uncle, aunt, grandparents, cousin)", () => {
@@ -102,11 +105,10 @@ test("new relationships work in the hamper builder (uncle, aunt, grandparents, c
 
 test("care reminders: suggestion when due, plan the day before and on the day, circle; and they notify at 9", () => {
   const prefs = { spouseName: "Ada" };
-  const people = [{ _id: "uncle", name: "Uncle Tunde", relationship: "uncle", gifts: [] }];
-  const rs = care.careReminders({ prefs, log: [], people, today: TODAY });
+  const rs = care.careReminders({ prefs: { ...prefs, circleRelationships: ["uncle"] }, log: [], people: [], today: TODAY });
   assert.ok(rs.some((r) => r.kind === "care" && r.size === "big" && /Ada/.test(r.text)));
   assert.ok(rs.some((r) => r.kind === "care" && r.size === "small"));
-  assert.ok(rs.some((r) => r.kind === "circle" && /Uncle Tunde/.test(r.text)));
+  assert.ok(rs.some((r) => r.kind === "circle" && /surprise an uncle/.test(r.text)));
   assert.ok(rs.every((r) => r.priority === 1));
 
   const tomorrow = care.careReminders({ prefs, log: [{ _id: "p", kind: "care", ideaKey: "spin", size: "big", title: "Spin class", status: "planned", date: daysAgo(2), plannedFor: new Date("2026-11-22T15:00:00Z") }], people: [], today: TODAY });
