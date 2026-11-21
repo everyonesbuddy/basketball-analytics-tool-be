@@ -7,6 +7,9 @@ const mongoose = require("mongoose");
 const Person = require("../models/giftPersonModel");
 const Plan = require("../models/giftPlanModel");
 const Idea = require("../models/giftIdeaModel");
+const Care = require("../models/giftCareModel");
+const CC = require("../config/os/care");
+const care = require("../utils/os/care");
 const G = require("../config/os/gifting");
 const gifting = require("../utils/os/gifting");
 const { fetchPreview } = require("../utils/os/linkPreview");
@@ -33,15 +36,27 @@ const loadAll = async (owner) => {
   return { people, plans, ideas };
 };
 
-/** Reminders for Today (used by the OS controller). */
+/** Care settings and log, with the spouse's name filled in from her person record. */
+async function careFor(owner, people) {
+  const c = (await Care.findOne({ owner }).lean()) || { log: [] };
+  const spouse = (c.spouseId && people.find((p) => String(p._id) === String(c.spouseId))) || people.find((p) => p.relationship === "wife") || null;
+  const prefs = { ...c, spouseId: spouse ? String(spouse._id) : null, spouseName: c.spouseName || spouse?.name || "" };
+  return { prefs, log: c.log || [], spouse };
+}
+
+/** Reminders for Today (used by the OS controller): dates and plans, plus care and the gift circle. */
 exports.remindersFor = async (owner) => {
   const [people, plans] = await Promise.all([Person.find({ owner }).lean(), Plan.find({ owner, status: { $ne: "done" } }).lean()]);
-  return gifting.reminders({ people, plans, today: plan.localParts().date });
+  const today = plan.localParts().date;
+  const { prefs, log } = await careFor(owner, people);
+  return [...care.careReminders({ prefs, log, people, today }), ...gifting.reminders({ people, plans, today })];
 };
 
 exports.overview = async (req, res) => {
   const all = await loadAll(req.user.id);
-  const reminders = gifting.reminders({ people: all.people, plans: all.plans, today: plan.localParts().date });
+  const today = plan.localParts().date;
+  const { prefs, log } = await careFor(req.user.id, all.people);
+  const reminders = [...care.careReminders({ prefs, log, people: all.people, today }), ...gifting.reminders({ people: all.people, plans: all.plans, today })];
   return res.json({
     success: true,
     ...all,
@@ -64,6 +79,7 @@ function personFields(b) {
   if (b.sizes) out.sizes = { shirt: str(b.sizes.shirt, 20), shoe: str(b.sizes.shoe, 20) };
   if (b.likes !== undefined) out.likes = str(b.likes, 500);
   if (b.servicesOk !== undefined) out.servicesOk = Boolean(b.servicesOk);
+  if (b.inCircle !== undefined) out.inCircle = Boolean(b.inCircle);
   if (b.notes !== undefined) out.notes = str(b.notes, 2000);
   return out;
 }
@@ -252,3 +268,143 @@ exports.deleteIdea = async (req, res) => {
   if (!r.deletedCount) return fail(res, 404, "Not found");
   return res.json({ success: true });
 };
+
+// ── Care for your wife, and the gift circle ──────────────────────────────
+
+async function careView(owner) {
+  const people = await Person.find({ owner }).sort({ name: 1 }).lean();
+  const today = plan.localParts().date;
+  const { prefs, log, spouse } = await careFor(owner, people);
+  return {
+    success: true,
+    today,
+    prefs: {
+      spouseId: prefs.spouseId,
+      spouseName: prefs.spouseName,
+      likesKinds: prefs.likesKinds || [],
+      dislikes: prefs.dislikes || [],
+      wishlist: prefs.wishlist || "",
+      budgetSmall: prefs.budgetSmall ?? 40,
+      budgetBig: prefs.budgetBig ?? 150,
+      smallEveryDays: prefs.smallEveryDays ?? CC.DEFAULTS.smallEveryDays,
+      bigEveryDays: prefs.bigEveryDays ?? CC.DEFAULTS.bigEveryDays,
+      circleOn: prefs.circleOn !== false,
+      circleEveryDays: prefs.circleEveryDays ?? CC.DEFAULTS.circleEveryDays,
+      circleBudget: prefs.circleBudget ?? CC.DEFAULTS.circleBudget,
+      circleRelationships: prefs.circleRelationships?.length ? prefs.circleRelationships : CC.CIRCLE_RELATIONSHIPS,
+    },
+    spouse: spouse ? { _id: String(spouse._id), name: spouse.name } : null,
+    kinds: CC.KINDS,
+    ideas: CC.CARE_IDEAS.map((i) => ({ ...i, links: care.links(i) })),
+    suggestions: { big: care.suggestCare({ prefs, log, today, size: "big", count: 3 }), small: care.suggestCare({ prefs, log, today, size: "small", count: 3 }) },
+    due: care.careDue({ prefs, log, today }),
+    circle: care.circle({ people, log, today, prefs, count: 4 }),
+    log: [...log].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 60),
+    people: people.map((p) => ({ _id: String(p._id), name: p.name, relationship: p.relationship, inCircle: p.inCircle !== false, last: care.lastGiftFor(p, log) })),
+    relationships: G.RELATIONSHIPS,
+  };
+}
+
+/** GET /gifting/care: suggestions for her, what's due, the gift circle, and the log. */
+exports.careOverview = async (req, res) => res.json(await careView(req.user.id));
+
+/** PATCH /gifting/care: her likes, dislikes, wishlist, budgets, how often, and the circle settings. */
+exports.updateCare = async (req, res) => {
+  const b = req.body || {};
+  const set = {};
+  if (b.spouseId !== undefined) set.spouseId = isId(b.spouseId) ? b.spouseId : null;
+  if (b.spouseName !== undefined) set.spouseName = str(b.spouseName, 60);
+  if (Array.isArray(b.likesKinds)) set.likesKinds = b.likesKinds.filter((k) => CC.KINDS[k]);
+  if (Array.isArray(b.dislikes)) set.dislikes = b.dislikes.filter((k) => CC.CARE_IDEAS.some((i) => i.key === k)).slice(0, 100);
+  if (b.wishlist !== undefined) set.wishlist = str(b.wishlist, 2000);
+  const n = (k, lo, hi) => {
+    if (b[k] === undefined) return;
+    const v = num(b[k], lo, hi);
+    if (v !== null) set[k] = Math.round(v);
+  };
+  n("budgetSmall", 0, 1000);
+  n("budgetBig", 0, 5000);
+  n("smallEveryDays", 3, 60);
+  n("bigEveryDays", 7, 120);
+  n("circleEveryDays", 14, 180);
+  n("circleBudget", 10, 2000);
+  if (b.circleOn !== undefined) set.circleOn = Boolean(b.circleOn);
+  if (Array.isArray(b.circleRelationships)) set.circleRelationships = b.circleRelationships.filter((r) => G.RELATIONSHIPS.some((x) => x.key === r) && r !== "wife");
+  await Care.updateOne({ owner: req.user.id }, { $set: set, $setOnInsert: { owner: req.user.id } }, { upsert: true });
+  return res.json(await careView(req.user.id));
+};
+
+/** Also log it on the person's gift history, so "haven't gifted in a while" stays right. */
+async function logOnPerson(owner, personId, what, cost, date) {
+  if (!personId) return;
+  await Person.updateOne({ _id: personId, owner }, { $push: { gifts: { $each: [{ date, what: str(what, 300), cost }], $slice: -100 } } });
+}
+
+/**
+ * POST /gifting/care/log { kind: "care"|"circle", ideaKey?, personId?, title?, status, plannedFor?, cost?, note? }
+ * Done care for her (with her on your people) and done circle gifts also go on that person's gift log.
+ */
+exports.addCareLog = async (req, res) => {
+  const b = req.body || {};
+  const kind = b.kind === "circle" ? "circle" : "care";
+  const status = ["planned", "done", "skipped"].includes(b.status) ? b.status : null;
+  if (!status) return fail(res, 400, "Planned, done or skipped?");
+  const idea = kind === "care" ? CC.CARE_IDEAS.find((i) => i.key === b.ideaKey) : null;
+  const title = str(b.title, 200) || idea?.title || "";
+  if (kind === "care" && !idea && !title) return fail(res, 400, "What did you do for her?");
+  if (kind === "circle" && !isId(b.personId)) return fail(res, 400, "Who is it for?");
+  const people = await Person.find({ owner: req.user.id }).lean();
+  if (kind === "circle" && !people.some((p) => String(p._id) === String(b.personId))) return fail(res, 404, "That person isn't in your people.");
+  const entry = {
+    kind,
+    ideaKey: idea?.key || null,
+    size: kind === "care" ? (idea?.size || (b.size === "small" ? "small" : "big")) : null,
+    personId: kind === "circle" ? b.personId : null,
+    title,
+    status,
+    date: dateOrNull(b.date) || new Date(),
+    plannedFor: status === "planned" ? dateOrNull(b.plannedFor) : null,
+    cost: num(b.cost, 0, 100000),
+    note: str(b.note, 500),
+  };
+  await Care.updateOne({ owner: req.user.id }, { $push: { log: { $each: [entry], $slice: -500 } }, $setOnInsert: { owner: req.user.id } }, { upsert: true });
+  if (status === "done") {
+    const { spouse } = await careFor(req.user.id, people);
+    const personId = kind === "circle" ? b.personId : spouse?._id;
+    await logOnPerson(req.user.id, personId, title, entry.cost, entry.date);
+  }
+  return res.status(201).json(await careView(req.user.id));
+};
+
+/** PATCH /gifting/care/log/:id { status, plannedFor, cost, note }: e.g. a planned one is now done. */
+exports.updateCareLog = async (req, res) => {
+  if (!isId(req.params.id)) return fail(res, 404, "Not found");
+  const doc = await Care.findOne({ owner: req.user.id });
+  const entry = doc?.log.id(req.params.id);
+  if (!entry) return fail(res, 404, "Not found");
+  const b = req.body || {};
+  const wasDone = entry.status === "done";
+  if (["planned", "done", "skipped"].includes(b.status)) {
+    entry.status = b.status;
+    if (b.status === "done") entry.date = new Date();
+  }
+  if (b.plannedFor !== undefined) entry.plannedFor = dateOrNull(b.plannedFor);
+  if (b.cost !== undefined) entry.cost = num(b.cost, 0, 100000);
+  if (b.note !== undefined) entry.note = str(b.note, 500);
+  await doc.save();
+  if (!wasDone && entry.status === "done") {
+    const people = await Person.find({ owner: req.user.id }).lean();
+    const { spouse } = await careFor(req.user.id, people);
+    await logOnPerson(req.user.id, entry.kind === "circle" ? entry.personId : spouse?._id, entry.title, entry.cost, entry.date);
+  }
+  return res.json(await careView(req.user.id));
+};
+
+/** DELETE /gifting/care/log/:id */
+exports.deleteCareLog = async (req, res) => {
+  if (!isId(req.params.id)) return fail(res, 404, "Not found");
+  await Care.updateOne({ owner: req.user.id }, { $pull: { log: { _id: req.params.id } } });
+  return res.json(await careView(req.user.id));
+};
+
+exports._care = { careView };

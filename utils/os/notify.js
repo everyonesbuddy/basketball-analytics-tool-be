@@ -108,6 +108,11 @@ function dueNotifications({ today, minutes, raw = {}, dinner = null, settings = 
 
   if (s.gifts && justNow(minutes, "09:00", window)) {
     for (const g of raw.gifts || []) {
+      // Care and the gift circle: the day it's due (or planned), then every 3 days until you act on it.
+      if (g.kind === "care" || g.kind === "circle") {
+        if (g.days >= 0 && g.days % 3 === 0) add({ key: `gift:${g.kind}:${g.size || g.personId || ""}:${date}`, kind: "gifts", title: g.kind === "care" ? "For her" : "Gift circle", body: g.text, url: g.kind === "care" ? "/gifting/care" : "/gifting/circle" });
+        continue;
+      }
       const milestone = g.kind === "date" ? [7, 1, 0].includes(g.days) : [21, 14, 7, 3, 1].includes(g.days);
       if (milestone) add({ key: `gift:${g.personId || g.planId}:${g.kind}:${g.days}:${date.slice(0, 7)}`, kind: "gifts", title: "Gifting", body: g.text, url: g.planId ? `/gifting/plan/${g.planId}` : "/gifting" });
     }
