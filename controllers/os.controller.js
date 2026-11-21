@@ -81,7 +81,7 @@ exports.todayFor = async (owner, at = new Date()) => {
   const t = plan.buildToday({ goals, logs, at, reviewDone: Boolean(reviewDone) });
   // Gifting reminders that are due soon join the day's decisions.
   const gifts = (await require("./gifting.controller").remindersFor(owner)).filter((r) => r.priority === 1);
-  t.attention.push(...gifts.map((r) => ({ kind: "gift", text: r.text })));
+  t.attention.push(...gifts.map((r) => ({ kind: "gift", text: r.text, ...(r.kind === "care" ? { to: "/gifting/care" } : r.kind === "circle" ? { to: "/gifting/circle" } : {}) })));
   // Shows coming up and tickets going on sale.
   const shows = await require("./events.controller").remindersFor(owner);
   t.attention.push(...shows.map((r) => ({ kind: "event", text: r.text })));

@@ -42,6 +42,11 @@ router.get("/review", asyncHandler(c.getReview));
 router.post("/review", asyncHandler(c.saveReview));
 
 // Gifting
+const bass = require("../controllers/bass.controller");
+router.get("/bass", asyncHandler(bass.overview));
+router.patch("/bass", asyncHandler(bass.settings));
+router.post("/bass/attempt", asyncHandler(bass.attempt));
+router.post("/bass/practice", asyncHandler(bass.practice));
 router.get("/gifting", asyncHandler(g.overview));
 router.post("/gifting/people", asyncHandler(g.createPerson));
 router.patch("/gifting/people/:id", asyncHandler(g.updatePerson));
