@@ -16,6 +16,7 @@ const giftPersonSchema = new mongoose.Schema(
     sizes: { shirt: { type: String, trim: true, maxlength: 20, default: "" }, shoe: { type: String, trim: true, maxlength: 20, default: "" } },
     likes: { type: String, trim: true, maxlength: 500, default: "" },
     servicesOk: { type: Boolean, default: false }, // open to a service or experience instead of a thing
+    inCircle: { type: Boolean, default: true }, // can come up in the gift circle
     notes: { type: String, trim: true, maxlength: 2000, default: "" },
     gifts: [{ date: { type: Date, required: true }, what: { type: String, trim: true, maxlength: 300 }, cost: { type: Number, min: 0, default: null }, plan: { type: mongoose.Schema.Types.ObjectId, ref: "OsGiftPlan", default: null } }],
   },

@@ -172,7 +172,7 @@ function planHamper({ relationship = "friend", budget = 50, likes = "", services
   const tooSmall = options[0].items.length < 2;
   // Services and experiences that suit this relationship and place, within budget first.
   const serviceIdeas = services
-    ? G.SERVICES.filter((s) => s.for.includes(relationship) && (where === "any" || s.where === "any" || s.where === where))
+    ? G.SERVICES.filter((s) => s.for.includes(G.RELATIONSHIP_LIKE[relationship] || relationship) && (where === "any" || s.where === "any" || s.where === where))
         .map((s) => ({ ...s, fits: s.price <= budget }))
         .sort((a, b) => Number(b.fits) - Number(a.fits) || a.price - b.price)
         .slice(0, 4)

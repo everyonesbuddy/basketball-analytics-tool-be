@@ -42,6 +42,11 @@ router.get("/review", asyncHandler(c.getReview));
 router.post("/review", asyncHandler(c.saveReview));
 
 // Gifting
+const bass = require("../controllers/bass.controller");
+router.get("/bass", asyncHandler(bass.overview));
+router.patch("/bass", asyncHandler(bass.settings));
+router.post("/bass/attempt", asyncHandler(bass.attempt));
+router.post("/bass/practice", asyncHandler(bass.practice));
 router.get("/gifting", asyncHandler(g.overview));
 router.post("/gifting/people", asyncHandler(g.createPerson));
 router.patch("/gifting/people/:id", asyncHandler(g.updatePerson));
@@ -53,6 +58,11 @@ router.post("/gifting/plans", asyncHandler(g.createPlan));
 router.patch("/gifting/plans/:id", asyncHandler(g.updatePlan));
 router.delete("/gifting/plans/:id", asyncHandler(g.deletePlan));
 router.post("/gifting/link-preview", asyncHandler(g.linkPreview));
+router.get("/gifting/care", asyncHandler(g.careOverview));
+router.patch("/gifting/care", asyncHandler(g.updateCare));
+router.post("/gifting/care/log", asyncHandler(g.addCareLog));
+router.patch("/gifting/care/log/:id", asyncHandler(g.updateCareLog));
+router.delete("/gifting/care/log/:id", asyncHandler(g.deleteCareLog));
 router.post("/gifting/ideas", asyncHandler(g.createIdea));
 router.patch("/gifting/ideas/:id", asyncHandler(g.updateIdea));
 router.delete("/gifting/ideas/:id", asyncHandler(g.deleteIdea));

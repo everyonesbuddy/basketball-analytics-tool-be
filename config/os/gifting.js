@@ -74,10 +74,18 @@ const RELATIONSHIPS = [
   { key: "father", name: "Dad" },
   { key: "father_in_law", name: "Father-in-law" },
   { key: "sibling", name: "Brother or sister" },
+  { key: "grandmother", name: "Grandma" },
+  { key: "grandfather", name: "Grandpa" },
+  { key: "aunt", name: "Aunt" },
+  { key: "uncle", name: "Uncle" },
+  { key: "cousin", name: "Cousin" },
   { key: "friend", name: "Friend" },
   { key: "child", name: "Child" },
   { key: "colleague", name: "Colleague or host" },
 ];
+
+// Newer relationships borrow the service ideas of the closest older one.
+const RELATIONSHIP_LIKE = { grandmother: "mother", grandfather: "father", aunt: "mother_in_law", uncle: "father_in_law", cousin: "friend" };
 
 // price: typical single-item price. A hamper always includes the container and a card.
 const HAMPERS = {
@@ -154,6 +162,11 @@ const HAMPER_FOR = {
   father: ["grooming_gadget"],
   father_in_law: ["grooming_gadget"],
   sibling: ["thank_you", "grooming_gadget", "self_care"],
+  grandmother: ["comfort_care", "self_care"],
+  grandfather: ["grooming_gadget", "comfort_care"],
+  aunt: ["comfort_care", "self_care", "thank_you"],
+  uncle: ["grooming_gadget", "thank_you"],
+  cousin: ["thank_you", "grooming_gadget", "self_care"],
   friend: ["thank_you", "grooming_gadget", "self_care"],
   child: ["fun_box"],
   colleague: ["thank_you"],
@@ -180,4 +193,4 @@ const SERVICES = [
   { key: "ride", name: "Driver for a day of errands", price: 30, for: ["mother", "mother_in_law", "father", "father_in_law"], where: "ng", search: "chauffeur service gift", how: "Arrange a trusted driver for market and visiting day." },
 ];
 
-module.exports = { SERVICES, HAMPER_FOR, ITEMS, PACKAGING, TAX_RATE, SUITCASE_LB, GROUPS, PACKAGES, DEFAULT_PACKAGE, FALLBACK_PACKAGE, RELATIONSHIPS, HAMPERS };
+module.exports = { SERVICES, HAMPER_FOR, RELATIONSHIP_LIKE, ITEMS, PACKAGING, TAX_RATE, SUITCASE_LB, GROUPS, PACKAGES, DEFAULT_PACKAGE, FALLBACK_PACKAGE, RELATIONSHIPS, HAMPERS };
