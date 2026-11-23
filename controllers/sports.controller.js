@@ -7,6 +7,7 @@
 const mongoose = require("mongoose");
 const SportsBet = require("../models/sportsBetModel");
 const B = require("../utils/os/bets");
+const P = require("../utils/os/props");
 const data = require("../services/os/sportsData");
 const plan = require("../utils/os/plan");
 
@@ -47,6 +48,47 @@ exports.board = async (req, res) => {
   });
 };
 
+/**
+ * GET /sports/props?sport=: player prop ideas for games that haven't
+ * started (NBA: today and tomorrow; NFL: the week), DraftKings' main lines
+ * against each player's recent games.
+ */
+exports.props = async (req, res) => {
+  const sport = sportOf(req.query.sport);
+  let games;
+  try {
+    games = (await data.upcoming(sport)).filter((g) => g.state === "pre");
+  } catch (err) {
+    return res.status(502).json({ success: false, error: { message: `Couldn't reach ESPN for ${B.SPORTS[sport].name} games right now.`, detail: String(err.message || "") } });
+  }
+  games = games.sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, sport === "nfl" ? 16 : 12);
+  const lines = await Promise.allSettled(games.map((g) => data.propLines(sport, g.id)));
+  const withLines = games.map((g, i) => ({ g, lines: lines[i].status === "fulfilled" ? lines[i].value : [] })).filter((x) => x.lines.length);
+  const problems = [];
+  const failed = lines.filter((r) => r.status === "rejected").length;
+  if (failed) problems.push(`Prop lines didn't load for ${failed} game${failed === 1 ? "" : "s"} (${lines.find((r) => r.status === "rejected").reason?.message}).`);
+  let logs = new Map();
+  if (withLines.length) {
+    try {
+      logs = await data.playerLogs(sport, [...new Set(withLines.flatMap(({ g }) => [g.home.id, g.away.id]))]);
+    } catch (err) {
+      problems.push(`Players' recent games didn't load (${err.message}).`);
+    }
+  }
+  const legs = withLines.flatMap(({ g, lines: l }) => P.analyzeProps(g, l, logs));
+  const ideas = P.pickProps(legs).map((l) => ({ ...l, day: easternDate(l.date), shop: B.shopRange(l, l.sd, { keep: 0.03 }) })); // props: a rougher model, so a bigger cushion
+  res.json({
+    success: true,
+    sport,
+    stats: P.STATS[sport],
+    games: games.map((g) => ({ id: g.id, name: g.name, date: g.date, day: easternDate(g.date), props: withLines.find((x) => x.g.id === g.id)?.lines.length || 0 })),
+    lines: legs.length / 2,
+    ideas,
+    problems,
+    note: "Lines are DraftKings' main lines via ESPN, priced as -110; your book may differ. The model is each player's last 15 games (the last 5 count double), blended half and half with the line. It doesn't know injuries, minutes limits or matchups.",
+  });
+};
+
 /** GET /sports/futures?sport=: each futures market with the best value first, team names attached. */
 exports.futures = async (req, res) => {
   const sport = sportOf(req.query.sport);
@@ -76,12 +118,17 @@ async function settlePending(owner) {
   for (const b of pending) for (const l of b.legs) if (l.result === "pending" && l.date && l.date <= today && l.eventId) (need[l.sport] ||= []).push(l.date);
   const finals = {};
   for (const [sport, dates] of Object.entries(need)) Object.assign(finals, await data.finalsFor(sport, dates).catch(() => ({})));
+  // Props settle from the box score once the game is final.
+  const boxes = {};
+  for (const b of pending)
+    for (const l of b.legs)
+      if (l.result === "pending" && l.market === "prop" && finals[l.eventId]?.completed && !(l.eventId in boxes)) boxes[l.eventId] = await data.boxScore(l.sport, l.eventId).catch(() => null);
   let settled = 0;
   for (const b of pending) {
     let changed = false;
     for (const l of b.legs) {
       if (l.result !== "pending") continue;
-      const r = B.settleLeg(l, finals[l.eventId]);
+      const r = l.market === "prop" ? (finals[l.eventId]?.completed ? P.settleProp(l, boxes[l.eventId]) : null) : B.settleLeg(l, finals[l.eventId]);
       if (r) {
         l.result = r;
         changed = true;
@@ -123,7 +170,9 @@ exports.addBet = async (req, res) => {
     sport: sportOf(l.sport),
     date: /^\d{4}-\d{2}-\d{2}$/.test(l.date || "") ? l.date : l.date ? easternDate(l.date) : "",
     matchup: String(l.matchup || "").slice(0, 60),
-    market: ["spread", "total", "moneyline", "future"].includes(l.market) ? l.market : kind === "future" ? "future" : "moneyline",
+    market: ["spread", "total", "moneyline", "prop", "future"].includes(l.market) ? l.market : kind === "future" ? "future" : "moneyline",
+    stat: l.market === "prop" ? String(l.stat || "").slice(0, 20) : "",
+    athleteId: l.market === "prop" ? String(l.athleteId || "").slice(0, 20) : "",
     side: String(l.side || "").slice(0, 20),
     line: Number.isFinite(Number(l.line)) && l.line !== null && l.line !== "" ? Number(l.line) : null,
     odds: Number(l.odds),
@@ -132,6 +181,7 @@ exports.addBet = async (req, res) => {
   if (!legs.length || legs.some((l) => !l.odds || !l.label)) return fail(res, 400, "Each pick needs a label and odds.");
   if (kind === "straight" && legs.length !== 1) return fail(res, 400, "A straight bet has one pick.");
   if (kind === "parlay" && legs.length < 2) return fail(res, 400, "A parlay needs two or more picks.");
+  if (legs.some((l) => l.market === "prop" && (!l.stat || !l.athleteId || l.line === null))) return fail(res, 400, "A prop needs the player, the stat and the line.");
   const decimal = legs.reduce((d, l) => d * B.toDecimal(l.odds), 1);
   const bet = await SportsBet.create({ owner: req.user.id, kind, legs, stake, odds: B.toAmerican(decimal), fromIdea: Boolean(b.fromIdea), note: String(b.note || "").slice(0, 500) });
   res.status(201).json({ success: true, bet });

@@ -10,6 +10,8 @@
  *    price, and the expected value
  *  - parlays: 2–3 legs from different games, only when each leg has an edge
  *  - futures: title odds against a rough model from the ratings
+ *  - shopping: since you bet at your own book, not at ESPN's number, each
+ *    pick says the worst line and the worst price it's still worth taking
  *  - settling: spread, total and moneyline results from the final score
  */
 
@@ -46,6 +48,69 @@ function fairPair(a, b) {
   const pb = breakEven(b);
   if (!pa || !pb) return null;
   return [pa / (pa + pb), pb / (pa + pb)];
+}
+
+/** Inverse of normCdf (by bisection; plenty precise for odds). */
+function invNorm(p) {
+  if (!(p > 0 && p < 1)) return p <= 0 ? -Infinity : Infinity;
+  let lo = -8;
+  let hi = 8;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (normCdf(mid) < p) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+const KEY_NUMBERS = [-7, -3, 3, 7]; // NFL margins that land most often
+
+/**
+ * How far you can shop a pick and still have it worth taking: `keep` is the
+ * smallest edge still worth a bet. Returns
+ *  - worstOdds: at this line, the worst price to take (rounded to a nickel, the safe way)
+ *  - worstLine: at -110, the worst line to take (half points, props whole points, up to 6 steps;
+ *    NFL spreads never past 3 or 7), or null for moneylines
+ * The chance at another line comes from the same blended view: the line
+ * that makes it 50/50 stays put, and the spread (sd) is the model's.
+ */
+function shopRange(leg, sd, { keep = 0.015, sport = leg.sport } = {}) {
+  if (!leg.prob || !leg.odds) return null;
+  const maxBe = leg.prob - keep;
+  let worstOdds = null;
+  if (maxBe > 0.05 && maxBe < 0.97) {
+    const a = toAmerican(1 / maxBe);
+    worstOdds = Math.ceil(a / 5) * 5; // -127 → -125, +113 → +115: never looser than the math
+    if (worstOdds > -100 && worstOdds < 100) worstOdds = worstOdds >= 0 ? 100 : -100;
+  }
+  if (leg.market === "moneyline" || leg.line === null || leg.line === undefined || !sd) return { worstOdds, worstLine: null };
+  const be = breakEven(-110);
+  // chance at line L, with c the 50/50 point implied by our chance at the posted line
+  let chance;
+  let step;
+  if (leg.market === "spread") {
+    const c = sd * invNorm(leg.prob) - leg.line;
+    chance = (L) => normCdf((c + L) / sd);
+    step = -0.5; // fewer points is worse
+  } else if (leg.side === "over") {
+    const c = leg.line + sd * invNorm(leg.prob);
+    chance = (L) => normCdf((c - L) / sd);
+    step = 0.5; // a higher number is worse for an over
+  } else {
+    const c = leg.line - sd * invNorm(leg.prob);
+    chance = (L) => normCdf((L - c) / sd);
+    step = -0.5;
+  }
+  if (chance(leg.line) - be < keep) return { worstOdds, worstLine: null }; // only works at this price
+  if (leg.market === "prop") step *= 2; // prop lines move in whole points (24.5 → 25.5)
+  let L = leg.line;
+  for (let i = 0; i < 6; i++) {
+    if (sport === "nfl" && leg.market === "spread" && KEY_NUMBERS.includes(L)) break;
+    const next = L + step;
+    if (chance(next) - be < keep) break;
+    L = next;
+  }
+  return { worstOdds, worstLine: L };
 }
 
 // ── Ratings ────────────────────────────────────────────────────────────
@@ -223,7 +288,8 @@ function analyzeGame(game, rt, { blend = 0.5 } = {}) {
     leg("moneyline", "away", null, L.awayMl, 1 - pHome, fair?.[1], `${game.away.abbr} to win`);
   }
   const conf = (l) => (proj.games < S.minGames ? "low" : l.edge >= 0.06 ? "high" : l.edge >= 0.035 ? "medium" : "low");
-  return { ...game, projection: { margin: round(proj.margin, 1), total: round(proj.total, 1), games: proj.games }, legs: legs.map((l) => ({ ...l, confidence: conf(l) })) };
+  const sdOf = (l) => (l.market === "spread" ? S.marginSd : l.market === "total" ? S.totalSd : null);
+  return { ...game, projection: { margin: round(proj.margin, 1), total: round(proj.total, 1), games: proj.games }, legs: legs.map((l) => ({ ...l, confidence: conf(l), shop: shopRange(l, sdOf(l)) })) };
 }
 
 /** The ideas worth a look: legs with at least `minEdge` edge, best first, one per market per game. */
@@ -347,7 +413,7 @@ function betRecord(bets) {
   return {
     all: group(settled),
     byKind: Object.fromEntries(["straight", "parlay", "future"].map((k) => [k, group(settled.filter((b) => kindOf(b) === k))])),
-    byMarket: Object.fromEntries(["spread", "total", "moneyline"].map((m) => [m, group(settled.filter((b) => kindOf(b) === "straight" && b.legs[0]?.market === m))])),
+    byMarket: Object.fromEntries(["spread", "total", "moneyline", "prop"].map((m) => [m, group(settled.filter((b) => kindOf(b) === "straight" && b.legs[0]?.market === m))])),
     pending: bets.filter((b) => b.status === "pending").length,
   };
 }
@@ -359,4 +425,4 @@ function seasonStart(sport, now = new Date()) {
   return new Date(Date.UTC(y, m, 1));
 }
 
-module.exports = { SPORTS, normCdf, toDecimal, breakEven, toAmerican, fairPair, ratings, project, parseEvent, finals, analyzeGame, pickIdeas, parlays, parseFutures, futuresValue, settleLeg, settleBet, betRecord, seasonStart };
+module.exports = { SPORTS, normCdf, invNorm, shopRange, toDecimal, breakEven, toAmerican, fairPair, ratings, project, parseEvent, finals, analyzeGame, pickIdeas, parlays, parseFutures, futuresValue, settleLeg, settleBet, betRecord, seasonStart };

@@ -63,6 +63,7 @@ router.delete("/trading/plays/:id", asyncHandler(tr.deletePlay));
 const sp = require("../controllers/sports.controller");
 router.get("/sports/board", asyncHandler(sp.board));
 router.get("/sports/futures", asyncHandler(sp.futures));
+router.get("/sports/props", asyncHandler(sp.props));
 router.get("/sports/bets", asyncHandler(sp.bets));
 router.post("/sports/bets", asyncHandler(sp.addBet));
 router.patch("/sports/bets/:id", asyncHandler(sp.updateBet));
