@@ -16,6 +16,18 @@
 const ta = require("./ta");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_TARGET_ATR = 4; // targets no further than 4 average daily ranges
+
+/**
+ * 0–100: how much the setup lines up (strength), the reward for the risk,
+ * and above all how it's done before on this symbol (hit rate and average
+ * result). A setup that usually failed here scores low whatever else it has.
+ */
+function scoreFor(strength, rewardRisk, h) {
+  const fit = strength * 0.3 + Math.min(rewardRisk, 3) * 8; // up to 54
+  const past = h.n >= 5 ? (h.hitRate ?? 0) * 40 + Math.max(-5, Math.min(5, h.avgReturnPct ?? 0)) * 2 : h.n >= 2 ? 14 : 10; // up to 50
+  return Math.max(0, Math.min(100, Math.round(fit + past)));
+}
 
 /** The four bases: the target gain that makes a play each one. Options move more than shares. */
 const BASES = [
@@ -195,13 +207,14 @@ function planFor(candles, I, i, direction) {
     stop = Math.max(sup ? sup * 0.99 : -Infinity, entry - 1.5 * atr);
     if (entry - stop < 0.75 * atr) stop = entry - 0.75 * atr;
     const res = resistances.find((r) => r >= entry + 1.5 * atr);
-    target = res ?? entry + 2.5 * atr;
+    // Resistance can be far away; about 4 ATR is what a swing realistically gives in a few weeks.
+    target = Math.min(res ?? entry + 2.5 * atr, entry + MAX_TARGET_ATR * atr);
   } else {
     const res = resistances.find((r) => r > entry);
     stop = Math.min(res ? res * 1.01 : Infinity, entry + 1.5 * atr);
     if (stop - entry < 0.75 * atr) stop = entry + 0.75 * atr;
     const sup = [...supports].reverse().find((s) => s <= entry - 1.5 * atr);
-    target = sup ?? entry - 2.5 * atr;
+    target = Math.max(sup ?? entry - 2.5 * atr, entry - MAX_TARGET_ATR * atr);
   }
   const risk = Math.abs(entry - stop);
   const reward = Math.abs(target - entry);
@@ -306,7 +319,7 @@ function ideasFor(symbol, candles, { kind = "stock" } = {}) {
       history: { ...h, hitRate: round(h.hitRate, 3), avgReturnPct: round(h.avgReturnPct, 2) },
       warning: h.n >= 5 && h.hitRate < 0.35 ? `This setup reached its target only ${h.wins} of ${h.n} times on ${symbol} in the last two years.` : h.n < 3 ? `Only ${h.n} past example${h.n === 1 ? "" : "s"} on ${symbol}: not much history to go on.` : null,
       // A simple score: strength, reward for the risk, and how it's done before.
-      score: Math.round(s.strength * 0.4 + Math.min(plan.rewardRisk, 4) * 10 + (h.n >= 3 ? (h.hitRate ?? 0) * 30 : 10)),
+      score: scoreFor(s.strength, plan.rewardRisk, h),
       indicators: { rsi: round(I.rsi[i], 1), stochK: round(I.stoch.k[i], 1), macdHist: round(I.macd.hist[i], 4), atr: round(I.atr[i], 4), volRatio: round(I.volRatio[i], 2), ema50: round(I.ema50[i], 4) },
     });
   }
@@ -469,4 +482,4 @@ function record(plays) {
   return { all: group(closed), byBase, byKind, open: plays.filter((p) => p.status === "open").length };
 }
 
-module.exports = { BASES, DEFAULT_SPLIT, LADDER, baseFor, setupsAt, levels, planFor, history, ideasFor, normCdf, blackScholes, optionLadder, sizeFor, returnPct, checkPlay, record };
+module.exports = { BASES, DEFAULT_SPLIT, LADDER, MAX_TARGET_ATR, scoreFor, baseFor, setupsAt, levels, planFor, history, ideasFor, normCdf, blackScholes, optionLadder, sizeFor, returnPct, checkPlay, record };
