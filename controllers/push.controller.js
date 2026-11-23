@@ -96,6 +96,14 @@ async function runFor(owner, now = new Date()) {
   const { minutes, date } = plan.localParts(now);
   const [settings, dinner, sentToday] = await Promise.all([settingsFor(owner), tonightsDinner(owner, date), PushSent.countDocuments({ owner, date })]);
   const due = notify.dueNotifications({ today, minutes, raw, dinner, settings, sentToday, now });
+  // Trading: scheduled scans, target/stop hits and expiries. Not during quiet hours.
+  const s = { ...notify.DEFAULTS, ...settings };
+  if (!notify.inQuiet(minutes, s.quietStart, s.quietEnd)) {
+    const trading = await require("./trading.controller")
+      .pushDue(owner, now)
+      .catch((err) => (console.error("Trading run failed:", err.message), []));
+    due.push(...trading);
+  }
   let sent = 0;
   for (const n of due) {
     // Claim the key first, so two runners never send the same one twice.
