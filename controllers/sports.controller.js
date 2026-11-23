@@ -19,13 +19,14 @@ const easternDate = (iso) => plan.localParts(new Date(iso)).date;
 /** GET /sports/board?sport=nba|nfl: games, our projection and lines, the best ideas and parlays. */
 exports.board = async (req, res) => {
   const sport = sportOf(req.query.sport);
-  let rt;
-  let games;
-  try {
-    [rt, games] = await Promise.all([data.seasonRatings(sport), data.upcoming(sport)]);
-  } catch (err) {
-    return fail(res, 502, `Couldn't reach ESPN for ${B.SPORTS[sport].name} games right now.`);
+  // Show what we can: games without projections if the season's results fail, or ratings without games.
+  const [r1, r2] = await Promise.allSettled([data.seasonRatings(sport), data.upcoming(sport)]);
+  if (r1.status === "rejected" && r2.status === "rejected") {
+    return res.status(502).json({ success: false, error: { message: `Couldn't reach ESPN for ${B.SPORTS[sport].name} games right now.`, detail: String(r2.reason?.message || r1.reason?.message || "") } });
   }
+  const rt = r1.status === "fulfilled" ? r1.value : { league: 0, teams: {} };
+  const games = r2.status === "fulfilled" ? r2.value : [];
+  const problems = [r1.status === "rejected" && `Season results didn't load (${r1.reason?.message}), so there are no projections yet.`, r2.status === "rejected" && `Upcoming games didn't load (${r2.reason?.message}).`].filter(Boolean);
   const names = await data.teams(sport).catch(() => ({}));
   const analyzed = games.map((g) => B.analyzeGame(g, rt));
   const ideas = B.pickIdeas(analyzed);
@@ -41,6 +42,7 @@ exports.board = async (req, res) => {
     ideas: ideas.map((l) => ({ ...l, day: easternDate(l.date) })),
     parlays: B.parlays(ideas),
     ratings: { teams: teamCount, league: Math.round(rt.league * 10) / 10, table: top },
+    problems,
     disclaimer: DISCLAIMER,
   });
 };

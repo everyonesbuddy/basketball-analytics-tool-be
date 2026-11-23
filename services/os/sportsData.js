@@ -3,7 +3,8 @@
  * NBA and NFL, this season's results for ratings, team names, and futures.
  * Cached so a page load doesn't hit ESPN dozens of times.
  */
-const { getJson } = require("../espn/espnClient");
+const espn = require("../espn/espnClient");
+const getJson = (...a) => espn.getJson(...a); // looked up each call, so tests can stand in for ESPN
 const B = require("../../utils/os/bets");
 
 const SITE = "https://site.api.espn.com/apis/site/v2/sports";
@@ -20,20 +21,39 @@ async function cached(key, ttlMs, load) {
 
 const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
 
-/** Parsed games between two dates (inclusive), in 30-day chunks. */
-async function games(sport, from, to, ttlMs = 10 * 60 * 1000) {
+/** One day's (or one range's) scoreboard, parsed. */
+async function scoreboard(sport, dates, ttlMs) {
   const { path } = B.SPORTS[sport];
+  const json = await cached(`sb:${sport}:${dates}`, ttlMs, () => getJson(`${SITE}/${path}/scoreboard`, { dates, limit: 500 }));
+  return (json?.events || []).map((ev) => B.parseEvent(ev, sport)).filter(Boolean);
+}
+
+/**
+ * Parsed games between two dates (inclusive). Asks ESPN for a week at a
+ * time; if a week's request fails, asks day by day so one bad day doesn't
+ * lose the rest. Throws only when nothing at all came back.
+ */
+async function games(sport, from, to, ttlMs = 10 * 60 * 1000) {
   const out = [];
-  for (let start = new Date(from); start <= to; start = new Date(start.getTime() + 30 * 86400000)) {
-    const end = new Date(Math.min(start.getTime() + 29 * 86400000, to.getTime()));
+  const errors = [];
+  for (let start = new Date(from); start <= to; start = new Date(start.getTime() + 7 * 86400000)) {
+    const end = new Date(Math.min(start.getTime() + 6 * 86400000, to.getTime()));
     const range = ymd(start) === ymd(end) ? ymd(start) : `${ymd(start)}-${ymd(end)}`;
-    const json = await cached(`sb:${sport}:${range}`, ttlMs, () => getJson(`${SITE}/${path}/scoreboard`, { dates: range, limit: 1000 }));
-    for (const ev of json?.events || []) {
-      const g = B.parseEvent(ev, sport);
-      if (g) out.push(g);
+    try {
+      out.push(...(await scoreboard(sport, range, ttlMs)));
+    } catch (err) {
+      for (let d = new Date(start); d <= end; d = new Date(d.getTime() + 86400000)) {
+        try {
+          out.push(...(await scoreboard(sport, ymd(d), ttlMs)));
+        } catch (e) {
+          errors.push(e.message);
+        }
+      }
     }
   }
-  return out;
+  if (!out.length && errors.length) throw new Error(errors[0]);
+  const seen = new Set();
+  return out.filter((g) => !seen.has(g.id) && seen.add(g.id));
 }
 
 /** This season's ratings (cached for 3 hours: results only change once a day). */
@@ -79,4 +99,4 @@ async function finalsFor(sport, dates) {
   return out;
 }
 
-module.exports = { games, seasonRatings, upcoming, teams, futures, finalsFor };
+module.exports = { games, seasonRatings, upcoming, teams, futures, finalsFor, _clearCache: () => cache.clear() };
