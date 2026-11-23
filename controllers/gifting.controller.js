@@ -341,8 +341,9 @@ async function logOnPerson(owner, personId, what, cost, date) {
 }
 
 /**
- * POST /gifting/care/log { kind: "care"|"circle", ideaKey?, personId?, title?, status, plannedFor?, cost?, note? }
- * Done care for her (with her on your people) and done circle gifts also go on that person's gift log.
+ * POST /gifting/care/log { kind: "care"|"circle", ideaKey?, relationship?, who?, title?, status, plannedFor?, cost?, note? }
+ * Circle gifts are by kind of person (relationship); "who" is an optional name.
+ * Done care for her (with her on your people) also goes on her gift log.
  */
 exports.addCareLog = async (req, res) => {
   const b = req.body || {};
@@ -352,14 +353,16 @@ exports.addCareLog = async (req, res) => {
   const idea = kind === "care" ? CC.CARE_IDEAS.find((i) => i.key === b.ideaKey) : null;
   const title = str(b.title, 200) || idea?.title || "";
   if (kind === "care" && !idea && !title) return fail(res, 400, "What did you do for her?");
-  if (kind === "circle" && !isId(b.personId)) return fail(res, 400, "Who is it for?");
+  const relationship = kind === "circle" ? b.relationship : null;
+  if (kind === "circle" && (!G.RELATIONSHIPS.some((r) => r.key === relationship) || relationship === "wife")) return fail(res, 400, "Who is it for: a friend, an uncle…?");
   const people = await Person.find({ owner: req.user.id }).lean();
-  if (kind === "circle" && !people.some((p) => String(p._id) === String(b.personId))) return fail(res, 404, "That person isn't in your people.");
   const entry = {
     kind,
     ideaKey: idea?.key || null,
     size: kind === "care" ? (idea?.size || (b.size === "small" ? "small" : "big")) : null,
-    personId: kind === "circle" ? b.personId : null,
+    personId: null,
+    relationship,
+    who: kind === "circle" ? str(b.who, 80) : "",
     title,
     status,
     date: dateOrNull(b.date) || new Date(),
@@ -368,10 +371,9 @@ exports.addCareLog = async (req, res) => {
     note: str(b.note, 500),
   };
   await Care.updateOne({ owner: req.user.id }, { $push: { log: { $each: [entry], $slice: -500 } }, $setOnInsert: { owner: req.user.id } }, { upsert: true });
-  if (status === "done") {
+  if (status === "done" && kind === "care") {
     const { spouse } = await careFor(req.user.id, people);
-    const personId = kind === "circle" ? b.personId : spouse?._id;
-    await logOnPerson(req.user.id, personId, title, entry.cost, entry.date);
+    await logOnPerson(req.user.id, spouse?._id, title, entry.cost, entry.date);
   }
   return res.status(201).json(await careView(req.user.id));
 };
@@ -391,11 +393,12 @@ exports.updateCareLog = async (req, res) => {
   if (b.plannedFor !== undefined) entry.plannedFor = dateOrNull(b.plannedFor);
   if (b.cost !== undefined) entry.cost = num(b.cost, 0, 100000);
   if (b.note !== undefined) entry.note = str(b.note, 500);
+  if (b.who !== undefined && entry.kind === "circle") entry.who = str(b.who, 80);
   await doc.save();
   if (!wasDone && entry.status === "done") {
     const people = await Person.find({ owner: req.user.id }).lean();
     const { spouse } = await careFor(req.user.id, people);
-    await logOnPerson(req.user.id, entry.kind === "circle" ? entry.personId : spouse?._id, entry.title, entry.cost, entry.date);
+    await logOnPerson(req.user.id, entry.kind === "circle" ? entry.personId : spouse?._id, entry.title, entry.cost, entry.date); // circle: only older entries tied to a person
   }
   return res.json(await careView(req.user.id));
 };

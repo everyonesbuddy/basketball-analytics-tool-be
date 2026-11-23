@@ -78,6 +78,23 @@ const KINDS = {
 const DEFAULTS = { smallEveryDays: 7, bigEveryDays: 30, circleEveryDays: 45, circleBudget: 50 };
 
 // Who's in the gift circle by default (the relationships from gifting).
+/** How each kind of person reads in a sentence: "Send an uncle something". */
+const CIRCLE_PHRASE = {
+  mother: "your mom",
+  father: "your dad",
+  mother_in_law: "your mother-in-law",
+  father_in_law: "your father-in-law",
+  grandmother: "a grandma",
+  grandfather: "a grandpa",
+  aunt: "an aunt",
+  uncle: "an uncle",
+  sibling: "a brother or sister",
+  cousin: "a cousin",
+  friend: "a friend",
+  colleague: "a colleague or host",
+  child: "a child in the family",
+};
+
 const CIRCLE_RELATIONSHIPS = ["mother", "father", "mother_in_law", "father_in_law", "grandmother", "grandfather", "aunt", "uncle", "sibling", "cousin", "friend", "colleague"];
 
-module.exports = { CARE_IDEAS, KINDS, DEFAULTS, CIRCLE_RELATIONSHIPS };
+module.exports = { CIRCLE_PHRASE, CARE_IDEAS, KINDS, DEFAULTS, CIRCLE_RELATIONSHIPS };

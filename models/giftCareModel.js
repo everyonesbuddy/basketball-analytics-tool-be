@@ -9,7 +9,9 @@ const entrySchema = new mongoose.Schema(
     kind: { type: String, enum: ["care", "circle"], required: true },
     ideaKey: { type: String, trim: true, maxlength: 60, default: null }, // care idea (config/os/care.js), or null for your own
     size: { type: String, enum: ["small", "big", null], default: null },
-    personId: { type: mongoose.Schema.Types.ObjectId, ref: "OsGiftPerson", default: null },
+    personId: { type: mongoose.Schema.Types.ObjectId, ref: "OsGiftPerson", default: null }, // older circle entries
+    relationship: { type: String, default: null }, // gift circle: the kind of person (uncle, friend…)
+    who: { type: String, default: "" }, // gift circle: who it went to, if you want to note it
     title: { type: String, trim: true, maxlength: 200, default: "" },
     status: { type: String, enum: ["planned", "done", "skipped"], required: true },
     date: { type: Date, default: Date.now }, // when it was done, planned or skipped

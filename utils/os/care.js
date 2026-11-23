@@ -12,6 +12,7 @@
  */
 const C = require("../../config/os/care");
 const gifting = require("./gifting");
+const G = require("../../config/os/gifting");
 
 const DAY = 24 * 60 * 60 * 1000;
 const ymd = (d) => new Date(d).toISOString().slice(0, 10);
@@ -113,52 +114,66 @@ function lastGiftFor(person, log) {
  * Order: no gift ever first, then the longest since a gift; closer tiers break ties.
  * skipped: people skipped in the last 14 days go to the back.
  */
+/**
+ * The gift circle, by kind of person (your mom, an uncle, a friend…), not
+ * by named people: every few weeks one kind comes up with a hamper idea in
+ * budget, and you pick who. Kinds never gifted come first, then the longest
+ * since a gift; one skipped lately waits. Old entries tied to a person count
+ * for that person's kind.
+ */
 function circle({ people = [], log = [], today, prefs = {}, count = 4 }) {
   const every = prefs.circleEveryDays ?? C.DEFAULTS.circleEveryDays;
   const budget = prefs.circleBudget ?? C.DEFAULTS.circleBudget;
-  const allowed = new Set(prefs.circleRelationships?.length ? prefs.circleRelationships : C.CIRCLE_RELATIONSHIPS);
-  const spouseId = prefs.spouseId ? String(prefs.spouseId) : null;
-  const tierRank = { close: 0, thoughtful: 1, casual: 2 };
-  const recentlySkipped = new Set(log.filter((l) => l.kind === "circle" && l.status === "skipped" && daysBetween(ymd(l.date), today) < 14).map((l) => String(l.personId)));
+  const kinds = (prefs.circleRelationships?.length ? prefs.circleRelationships : C.CIRCLE_RELATIONSHIPS).filter((r) => r !== "wife" && G.RELATIONSHIPS.some((x) => x.key === r));
+  const relOf = new Map(people.map((p) => [String(p._id), p.relationship]));
+  const kindOf = (l) => l.relationship || (l.personId ? relOf.get(String(l.personId)) : null) || null;
+  const circleLog = log.filter((l) => l.kind === "circle");
 
-  const pool = people
-    .filter((p) => String(p._id) !== spouseId && p.relationship !== "wife" && allowed.has(p.relationship) && p.inCircle !== false)
-    .map((p) => {
-      const last = lastGiftFor(p, log);
-      return { p, last, since: last ? daysBetween(last, today) : null };
-    })
-    .sort(
-      (a, b) =>
-        Number(recentlySkipped.has(String(a.p._id))) - Number(recentlySkipped.has(String(b.p._id))) ||
-        Number(a.last !== null) - Number(b.last !== null) ||
-        (b.since ?? 0) - (a.since ?? 0) ||
-        (tierRank[a.p.tier] ?? 1) - (tierRank[b.p.tier] ?? 1) ||
-        seeded(`${today}:${a.p._id}`) - seeded(`${today}:${b.p._id}`),
-    );
-
-  const idea = (p) => {
-    const rel = gifting.planHamper({ relationship: p.relationship, budget, likes: p.likes || "", services: p.servicesOk !== false });
-    return {
-      hamper: { key: rel.best.key, name: rel.best.name, total: rel.best.total, items: rel.best.items.map((i) => i.name) },
-      service: rel.services.find((s) => s.fits) ? { key: rel.services.find((s) => s.fits).key, name: rel.services.find((s) => s.fits).name, price: rel.services.find((s) => s.fits).price } : null,
-    };
-  };
-
-  const lastCircle = log
-    .filter((l) => l.kind === "circle" && l.status === "done")
+  const lastCircle = circleLog
+    .filter((l) => l.status === "done")
     .map((l) => ymd(l.date))
     .sort()
     .at(-1);
+  const seed = lastCircle || "start"; // the order holds until the next gift, so "up next" doesn't change day to day
+  const recentlySkipped = new Set(circleLog.filter((l) => l.status === "skipped" && daysBetween(ymd(l.date), today) < 14).map(kindOf));
+
+  const pool = kinds
+    .map((rel) => {
+      const last = circleLog
+        .filter((l) => l.status === "done" && kindOf(l) === rel)
+        .map((l) => ymd(l.date))
+        .sort()
+        .at(-1) || null;
+      return { rel, last, since: last ? daysBetween(last, today) : null };
+    })
+    .sort(
+      (a, b) =>
+        Number(recentlySkipped.has(a.rel)) - Number(recentlySkipped.has(b.rel)) ||
+        Number(a.last !== null) - Number(b.last !== null) ||
+        (b.since ?? 0) - (a.since ?? 0) ||
+        seeded(`${seed}:${a.rel}`) - seeded(`${seed}:${b.rel}`),
+    );
+
+  const idea = (rel) => {
+    const r = gifting.planHamper({ relationship: rel, budget, services: true });
+    const svc = r.services.find((s) => s.fits);
+    return {
+      hamper: { key: r.best.key, name: r.best.name, total: r.best.total, items: r.best.items.map((i) => i.name) },
+      service: svc ? { key: svc.key, name: svc.name, price: svc.price } : null,
+    };
+  };
+  const label = (rel) => G.RELATIONSHIPS.find((x) => x.key === rel)?.name || rel;
+
   const nextOn = lastCircle ? addDays(lastCircle, every) : today;
-  const planned = log.find((l) => l.kind === "circle" && l.status === "planned" && (!l.plannedFor || ymd(l.plannedFor) >= today));
+  const planned = circleLog.find((l) => l.status === "planned" && (!l.plannedFor || ymd(l.plannedFor) >= today));
   return {
     every,
     budget,
     lastDone: lastCircle || null,
     nextOn,
     due: !planned && nextOn <= today && pool.length > 0,
-    planned: planned ? { id: String(planned._id || ""), personId: String(planned.personId), title: planned.title, on: planned.plannedFor ? ymd(planned.plannedFor) : null } : null,
-    next: pool.slice(0, count).map(({ p, last, since }) => ({ personId: String(p._id), name: p.name, relationship: p.relationship, last, since, ...idea(p) })),
+    planned: planned ? { id: String(planned._id || ""), relationship: kindOf(planned), who: planned.who || "", title: planned.title, on: planned.plannedFor ? ymd(planned.plannedFor) : null } : null,
+    next: pool.slice(0, count).map(({ rel, last, since }) => ({ relationship: rel, name: label(rel), phrase: C.CIRCLE_PHRASE[rel] || `a ${label(rel).toLowerCase()}`, last, since, ...idea(rel) })),
     eligible: pool.length,
   };
 }
@@ -181,7 +196,7 @@ function careReminders({ prefs = {}, log = [], people = [], today }) {
     const c = circle({ people, log, today, prefs, count: 1 });
     if (c.due && c.next[0]) {
       const n = c.next[0];
-      out.push({ kind: "circle", priority: 1, days: daysBetween(c.nextOn, today), personId: n.personId, text: `Gift circle: send ${n.name} something this month. Idea: ${n.service && n.service.price < n.hamper.total ? n.service.name.toLowerCase() : `a ${n.hamper.name.toLowerCase()} hamper`} (about $${Math.round(n.service && n.service.price < n.hamper.total ? n.service.price : n.hamper.total)}).` });
+      out.push({ kind: "circle", priority: 1, days: daysBetween(c.nextOn, today), relationship: n.relationship, text: `Gift circle: surprise ${n.phrase} this month. Idea: ${n.service && n.service.price < n.hamper.total ? n.service.name.toLowerCase() : `a ${n.hamper.name.toLowerCase()} hamper`} (about $${Math.round(n.service && n.service.price < n.hamper.total ? n.service.price : n.hamper.total)}).` });
     }
   }
   return out;
