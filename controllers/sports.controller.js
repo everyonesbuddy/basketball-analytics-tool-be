@@ -26,12 +26,13 @@ exports.board = async (req, res) => {
   } catch (err) {
     return fail(res, 502, `Couldn't reach ESPN for ${B.SPORTS[sport].name} games right now.`);
   }
+  const names = await data.teams(sport).catch(() => ({}));
   const analyzed = games.map((g) => B.analyzeGame(g, rt));
   const ideas = B.pickIdeas(analyzed);
   const teamCount = Object.keys(rt.teams).length;
   const top = Object.entries(rt.teams)
     .sort((a, b) => b[1].rating - a[1].rating)
-    .map(([id, t]) => ({ id, ...t, rating: Math.round(t.rating * 10) / 10 }));
+    .map(([id, t]) => ({ id, abbr: names[id]?.abbr || "", name: names[id]?.name || "", ...t, rating: Math.round(t.rating * 10) / 10 }));
   res.json({
     success: true,
     sport,
