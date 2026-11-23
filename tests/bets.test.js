@@ -183,3 +183,41 @@ test("board from ESPN data: ratings from last results, today's games analyzed, i
   assert.ok(g.projection.margin > 3.5, "we project Boston by more than the line");
   assert.ok(body.ideas.some((l) => l.label === "BOS -3.5"), "so Boston -3.5 is an idea");
 });
+
+test("board: when ESPN refuses date ranges it asks day by day; when results fail it still shows games", async () => {
+  const espn = require("../services/espn/espnClient");
+  const orig = espn.getJson;
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const ev = (id, state) => ({ id, date: new Date().toISOString(), competitions: [{ status: { type: { state, completed: state === "post" } }, competitors: [{ homeAway: "home", team: { id: "1", abbreviation: "AAA" }, score: "100" }, { homeAway: "away", team: { id: "2", abbreviation: "BBB" }, score: "90" }], odds: [{ details: "AAA -3", overUnder: 210 }] }] });
+  const ctl = require("../controllers/sports.controller");
+  require("../services/os/sportsData")._clearCache();
+  const call = async () => {
+    let body;
+    let status = 200;
+    await ctl.board({ query: { sport: "nfl" } }, { json: (b) => (body = b), status: (s) => ((status = s), { json: (b) => (body = b) }) });
+    return { body, status };
+  };
+  try {
+    // Ranges fail; single days work: past days have a final, today has a game to bet.
+    espn.getJson = async (url, params) => {
+      if (/teams$/.test(url)) return {};
+      if (String(params.dates).includes("-")) throw new Error("ESPN request failed (400)");
+      return { events: [params.dates === today ? ev(`t${params.dates}`, "pre") : ev(`p${params.dates}`, "post")] };
+    };
+    const a = await call();
+    assert.equal(a.body.success, true, JSON.stringify(a.body));
+    assert.ok(a.body.games.some((g) => g.state === "pre"), "today's game is there");
+    assert.ok(a.body.ratings.teams >= 2, "ratings came from the day-by-day results");
+
+    // Everything fails: a 502 with ESPN's own reason.
+    require("../services/os/sportsData")._clearCache();
+    espn.getJson = async () => {
+      throw new Error("ESPN request error: getaddrinfo ENOTFOUND");
+    };
+    const b = await call();
+    assert.equal(b.status, 502);
+    assert.match(b.body.error.detail, /ENOTFOUND/);
+  } finally {
+    espn.getJson = orig;
+  }
+});
