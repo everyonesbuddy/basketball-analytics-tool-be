@@ -7,7 +7,9 @@ const legSchema = new mongoose.Schema(
     sport: { type: String, enum: ["nba", "nfl"], required: true },
     date: { type: String, default: "" }, // game day, YYYY-MM-DD (US Eastern)
     matchup: { type: String, trim: true, maxlength: 60, default: "" },
-    market: { type: String, enum: ["spread", "total", "moneyline", "future"], required: true },
+    market: { type: String, enum: ["spread", "total", "moneyline", "prop", "future"], required: true },
+    stat: { type: String, default: "" }, // props: points, rebounds, recYds…
+    athleteId: { type: String, default: "" }, // props: ESPN athlete id
     side: { type: String, trim: true, maxlength: 20, default: "" }, // home | away | over | under
     line: { type: Number, default: null },
     odds: { type: Number, required: true },
