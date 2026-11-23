@@ -164,4 +164,5 @@ test("GET /sports/props: DraftKings lines via ESPN against players' recent box s
   const [i] = body.ideas;
   assert.equal(i.label, "Jay Star over 24.5 points");
   assert.ok(i.shop.worstLine >= 24.5 && i.shop.worstOdds < -110, JSON.stringify(i.shop));
+  assert.equal(i.shop.worstLine % 1, 0.5, "prop ranges stay on .5 lines");
 });

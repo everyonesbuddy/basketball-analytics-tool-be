@@ -69,7 +69,7 @@ const KEY_NUMBERS = [-7, -3, 3, 7]; // NFL margins that land most often
  * How far you can shop a pick and still have it worth taking: `keep` is the
  * smallest edge still worth a bet. Returns
  *  - worstOdds: at this line, the worst price to take (rounded to a nickel, the safe way)
- *  - worstLine: at -110, the worst line to take (half points, up to 3 points away;
+ *  - worstLine: at -110, the worst line to take (half points, props whole points, up to 6 steps;
  *    NFL spreads never past 3 or 7), or null for moneylines
  * The chance at another line comes from the same blended view: the line
  * that makes it 50/50 stays put, and the spread (sd) is the model's.
@@ -102,6 +102,7 @@ function shopRange(leg, sd, { keep = 0.015, sport = leg.sport } = {}) {
     step = -0.5;
   }
   if (chance(leg.line) - be < keep) return { worstOdds, worstLine: null }; // only works at this price
+  if (leg.market === "prop") step *= 2; // prop lines move in whole points (24.5 → 25.5)
   let L = leg.line;
   for (let i = 0; i < 6; i++) {
     if (sport === "nfl" && leg.market === "spread" && KEY_NUMBERS.includes(L)) break;

@@ -76,7 +76,7 @@ exports.props = async (req, res) => {
     }
   }
   const legs = withLines.flatMap(({ g, lines: l }) => P.analyzeProps(g, l, logs));
-  const ideas = P.pickProps(legs).map((l) => ({ ...l, day: easternDate(l.date), shop: B.shopRange(l, l.sd) }));
+  const ideas = P.pickProps(legs).map((l) => ({ ...l, day: easternDate(l.date), shop: B.shopRange(l, l.sd, { keep: 0.03 }) })); // props: a rougher model, so a bigger cushion
   res.json({
     success: true,
     sport,
