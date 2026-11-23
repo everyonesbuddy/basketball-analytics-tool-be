@@ -224,3 +224,22 @@ test("push run: stocks scan at 10:00 on a weekday and alert; open plays that hit
     TradePlay.exists = orig.pe;
   }
 });
+
+test("targets stay within about 4 daily ranges, and a poor history pulls the score down", () => {
+  // A long climb then a sharp drop: the old high is far above, but the target stops at 4 ATR.
+  const closes = [];
+  let p = 50;
+  for (let i = 0; i < 200; i++) closes.push((p *= 1.01));
+  for (let i = 0; i < 60; i++) closes.push((p *= 0.985));
+  const cs = candles(closes);
+  const I = ta.indicators(cs);
+  const plan = T.planFor(cs, I, cs.length - 1, "up");
+  if (plan) assert.ok(plan.target <= plan.entry + T.MAX_TARGET_ATR * plan.atr + 1e-9);
+
+  const good = T.scoreFor(80, 3.5, { n: 10, hitRate: 0.7, avgReturnPct: 3 });
+  const bad = T.scoreFor(80, 3.5, { n: 6, hitRate: 1 / 6, avgReturnPct: 1.8 });
+  const unknown = T.scoreFor(80, 3.5, { n: 1, hitRate: 1, avgReturnPct: 5 });
+  assert.ok(good > unknown && unknown > bad - 10, `${good} > ${unknown}; bad ${bad}`);
+  assert.ok(bad < 60, "the COIN case (1 of 6) no longer scores in the 70s");
+  assert.ok(good >= 80);
+});
