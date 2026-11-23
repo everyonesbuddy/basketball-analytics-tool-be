@@ -347,7 +347,8 @@ const LADDER = [
  * For one idea, the best contract for each base from the option chains
  * [{ expiration (Date|ISO), calls: [...], puts: [...] }] (Yahoo's shape).
  * Each is priced at the mid, and projected at the stock's target and stop
- * about `holdDays` from now with the same implied volatility.
+ * about `holdDays` from now (or halfway to expiry, if sooner) with the same
+ * implied volatility.
  */
 function optionLadder(idea, chains, { now = new Date(), holdDays = 14, r = 0.04 } = {}) {
   const type = idea.direction === "up" ? "call" : "put";
@@ -377,7 +378,8 @@ function optionLadder(idea, chains, { now = new Date(), holdDays = 14, r = 0.04 
       }
     }
     if (!best) continue;
-    const Tleft = Math.max((best.days - holdDays) / 365, 1 / 365);
+    // Assume the move takes about two weeks, or half the time to expiry if that's sooner.
+    const Tleft = Math.max((best.days - Math.min(holdDays, best.days / 2)) / 365, 1 / 365);
     const atTarget = blackScholes({ S: idea.target, K: best.c.strike, T: Tleft, sigma: best.iv, r, type }).price;
     const atStop = blackScholes({ S: idea.stop, K: best.c.strike, T: Tleft, sigma: best.iv, r, type }).price;
     const gainPct = pct(atTarget, best.mid);
@@ -385,7 +387,7 @@ function optionLadder(idea, chains, { now = new Date(), holdDays = 14, r = 0.04 
     const breakeven = type === "call" ? best.c.strike + best.mid : best.c.strike - best.mid;
     picks.push({
       intent: rung.base,
-      base: baseFor(gainPct, "option") || (gainPct > 0 ? "single" : null),
+      base: baseFor(gainPct, "option"),
       note: rung.note,
       contract: best.c.contractSymbol,
       type,
