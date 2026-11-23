@@ -47,6 +47,26 @@ router.get("/bass", asyncHandler(bass.overview));
 router.patch("/bass", asyncHandler(bass.settings));
 router.post("/bass/attempt", asyncHandler(bass.attempt));
 router.post("/bass/practice", asyncHandler(bass.practice));
+
+// Trading desk: ideas and tracking only; it never places trades.
+const tr = require("../controllers/trading.controller");
+router.get("/trading", asyncHandler(tr.overview));
+router.post("/trading/scan", asyncHandler(tr.scanNow));
+router.get("/trading/symbol/:symbol", asyncHandler(tr.lookup));
+router.patch("/trading/settings", asyncHandler(tr.updateSettings));
+router.post("/trading/plays", asyncHandler(tr.addPlay));
+router.post("/trading/plays/refresh", asyncHandler(tr.refresh));
+router.patch("/trading/plays/:id", asyncHandler(tr.updatePlay));
+router.delete("/trading/plays/:id", asyncHandler(tr.deletePlay));
+
+// Sports bets: ideas from ESPN's lines and a tracker; it never places bets.
+const sp = require("../controllers/sports.controller");
+router.get("/sports/board", asyncHandler(sp.board));
+router.get("/sports/futures", asyncHandler(sp.futures));
+router.get("/sports/bets", asyncHandler(sp.bets));
+router.post("/sports/bets", asyncHandler(sp.addBet));
+router.patch("/sports/bets/:id", asyncHandler(sp.updateBet));
+router.delete("/sports/bets/:id", asyncHandler(sp.deleteBet));
 router.get("/gifting", asyncHandler(g.overview));
 router.post("/gifting/people", asyncHandler(g.createPerson));
 router.patch("/gifting/people/:id", asyncHandler(g.updatePerson));
