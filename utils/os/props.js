@@ -10,7 +10,7 @@
  *    the main line), and how often he cleared it lately
  *  - settling: over/under from the final box score; no appearance is a push
  */
-const { normCdf, breakEven, toDecimal } = require("./bets");
+const { normCdf, invNorm, breakEven, toDecimal } = require("./bets");
 
 const round = (n, d = 3) => (n === null || n === undefined || !Number.isFinite(n) ? null : Math.round(n * 10 ** d) / 10 ** d);
 
@@ -152,6 +152,8 @@ function propModel(values, line) {
   const sd = Math.max(sd0, Math.sqrt(Math.max(mean, 0.5)), 0.2 * mean, 0.8);
   const last10 = v.slice(0, 10);
   return {
+    avg5: round(avg(v.slice(0, 5)), 1),
+    avg15: round(m15, 1),
     mean: round(mean, 1),
     sd: round(sd, 2),
     pOver: round(1 - normCdf((line - mean) / sd)),
@@ -212,6 +214,22 @@ function analyzeProps(game, lines, logs, { blend = 0.5, odds = -110 } = {}) {
         projection: m.mean,
         recent: { hits, of: m.of10, last5: m.last5, games: m.games },
         warning: missedLast ? `${log.name} sat his team's last game: check he's playing.` : null,
+        explain: {
+          ours: m.mean,
+          book: line,
+          middle: round(line + m.sd * invNorm(blend * m.pOver + (1 - blend) * 0.5), 1),
+          how: [
+            `Last 5 games he averaged ${m.avg5}; over his last ${Math.min(15, m.games)}, ${m.avg15}. Half of each → our line ${m.mean} ${name}.`,
+            `His games swing about ±${m.sd} around that, so ${line} gives ${Math.round(m.pOver * 100)}% for the over.`,
+            `He went over ${line} in ${m.over10} of his last ${m.of10}.`,
+          ],
+          why: [
+            Math.abs(m.mean - line) < 1
+              ? `DraftKings' ${line} is right on his recent average: no real disagreement.`
+              : `DraftKings has ${line}; his recent games say ${m.mean} (${m.mean > line ? "higher" : "lower"} by ${round(Math.abs(m.mean - line), 1)}).`,
+            `Books set props from the matchup, his minutes, injuries around him and where the money goes. We only see his recent box scores, so we blend half and half with the line.`,
+          ],
+        },
       });
     }
   }

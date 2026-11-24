@@ -362,46 +362,44 @@ const LADDER = [
  * Each is priced at the mid, and projected at the stock's target and stop
  * about `holdDays` from now (or halfway to expiry, if sooner) with the same
  * implied volatility.
+ *
+ * With `maxCost` ($ per contract), each base takes the best contract that
+ * fits under it; a base with none that fits keeps its best, marked
+ * overBudget. If fewer than two bases fit, a "budget" pick is added: the
+ * contract under maxCost that pays best for its risk at the target.
  */
-function optionLadder(idea, chains, { now = new Date(), holdDays = 14, r = 0.04 } = {}) {
+function optionLadder(idea, chains, { now = new Date(), holdDays = 14, r = 0.04, maxCost = null } = {}) {
   const type = idea.direction === "up" ? "call" : "put";
   const S = idea.price;
-  const picks = [];
-  for (const rung of LADDER) {
-    let best = null;
-    for (const chain of chains || []) {
-      const exp = new Date(chain.expiration ?? chain.expirationDate);
-      const days = (exp - now) / DAY_MS;
-      if (!(days >= rung.days[0] && days <= rung.days[1])) continue;
-      for (const c of (type === "call" ? chain.calls : chain.puts) || []) {
-        const bid = Number(c.bid) || 0;
-        const ask = Number(c.ask) || 0;
-        const iv = Number(c.impliedVolatility) || 0;
-        if (!(bid > 0 && ask > 0 && iv > 0.01)) continue;
-        const mid = (bid + ask) / 2;
-        if ((ask - bid) / mid > rung.maxSpread) continue;
-        if ((Number(c.openInterest) || 0) < 50) continue;
-        const T = days / 365;
-        const { delta } = blackScholes({ S, K: c.strike, T, sigma: iv, r, type });
-        const dAbs = Math.abs(delta);
-        if (dAbs < rung.delta[0] || dAbs > rung.delta[1]) continue;
-        const center = (rung.delta[0] + rung.delta[1]) / 2;
-        const fit = Math.abs(dAbs - center) + Math.abs(days - (rung.days[0] + rung.days[1]) / 2) / 365;
-        if (!best || fit < best.fit) best = { c, mid, iv, days, delta, fit, exp };
-      }
+  // Every quoted, liquid contract with its days and delta.
+  const all = [];
+  for (const chain of chains || []) {
+    const exp = new Date(chain.expiration ?? chain.expirationDate);
+    const days = (exp - now) / DAY_MS;
+    if (!(days >= 5)) continue;
+    for (const c of (type === "call" ? chain.calls : chain.puts) || []) {
+      const bid = Number(c.bid) || 0;
+      const ask = Number(c.ask) || 0;
+      const iv = Number(c.impliedVolatility) || 0;
+      if (!(bid > 0 && ask > 0 && iv > 0.01)) continue;
+      if ((Number(c.openInterest) || 0) < 50) continue;
+      const mid = (bid + ask) / 2;
+      const { delta } = blackScholes({ S, K: c.strike, T: days / 365, sigma: iv, r, type });
+      all.push({ c, mid, iv, days, delta, exp, spread: (ask - bid) / mid });
     }
-    if (!best) continue;
-    // Assume the move takes about two weeks, or half the time to expiry if that's sooner.
+  }
+  const price = (best, intent, note) => {
     const Tleft = Math.max((best.days - Math.min(holdDays, best.days / 2)) / 365, 1 / 365);
     const atTarget = blackScholes({ S: idea.target, K: best.c.strike, T: Tleft, sigma: best.iv, r, type }).price;
     const atStop = blackScholes({ S: idea.stop, K: best.c.strike, T: Tleft, sigma: best.iv, r, type }).price;
     const gainPct = pct(atTarget, best.mid);
     const lossPct = -pct(atStop, best.mid);
     const breakeven = type === "call" ? best.c.strike + best.mid : best.c.strike - best.mid;
-    picks.push({
-      intent: rung.base,
+    const cost = round(best.mid * 100, 0);
+    return {
+      intent,
       base: baseFor(gainPct, "option"),
-      note: rung.note,
+      note,
       contract: best.c.contractSymbol,
       type,
       strike: best.c.strike,
@@ -410,7 +408,8 @@ function optionLadder(idea, chains, { now = new Date(), holdDays = 14, r = 0.04 
       bid: round(Number(best.c.bid), 2),
       ask: round(Number(best.c.ask), 2),
       mid: round(best.mid, 2),
-      cost: round(best.mid * 100, 0),
+      cost,
+      overBudget: maxCost ? cost > maxCost : false,
       iv: round(best.iv, 3),
       delta: round(best.delta, 2),
       openInterest: Number(best.c.openInterest) || 0,
@@ -420,9 +419,117 @@ function optionLadder(idea, chains, { now = new Date(), holdDays = 14, r = 0.04 
       gainPct: round(gainPct, 0),
       lossPct: round(Math.min(lossPct, 100), 0),
       breakevenAtExpiry: round(breakeven, 2),
-    });
+    };
+  };
+  const fits = (x) => !maxCost || x.mid * 100 <= maxCost;
+  const picks = [];
+  for (const rung of LADDER) {
+    const center = (rung.delta[0] + rung.delta[1]) / 2;
+    const mid = (rung.days[0] + rung.days[1]) / 2;
+    const inRung = all
+      .filter((x) => x.days >= rung.days[0] && x.days <= rung.days[1] && x.spread <= rung.maxSpread && Math.abs(x.delta) >= rung.delta[0] && Math.abs(x.delta) <= rung.delta[1])
+      .map((x) => ({ ...x, fit: Math.abs(Math.abs(x.delta) - center) + Math.abs(x.days - mid) / 365 }))
+      .sort((a, b) => a.fit - b.fit);
+    const best = inRung.find(fits) || inRung[0];
+    if (best) picks.push(price(best, rung.base, rung.note));
   }
-  return picks.filter((p) => p.base && p.gainPct > 0);
+  const good = (p) => p.base && p.gainPct > 0;
+  if (maxCost && picks.filter((p) => good(p) && !p.overBudget).length < 2) {
+    // The contract under budget that pays best for its risk if the stock gets to the target.
+    let budget = null;
+    for (const x of all) {
+      if (!fits(x) || x.spread > 0.25 || x.days > 75 || Math.abs(x.delta) < 0.12 || Math.abs(x.delta) > 0.9) continue;
+      const p = price(x, "budget", `the best contract under $${maxCost}`);
+      if (!good(p) || picks.some((q) => q.contract === p.contract)) continue;
+      const ratio = p.gainPct / Math.max(p.lossPct, 1);
+      if (!budget || ratio > budget.ratio) budget = { ...p, ratio };
+    }
+    if (budget) {
+      const { ratio, ...p } = budget; // eslint-disable-line no-unused-vars
+      picks.push(p);
+    }
+  }
+  return picks.filter(good);
+}
+
+/**
+ * How our setups have done on this symbol: every time any setup fired in
+ * the candles, planned the usual way (stop, target), did it reach the target
+ * before the stop within 20 days? One trade at a time per setup.
+ */
+function symbolFit(candles, { horizon = 20 } = {}) {
+  if (!candles || candles.length < 120) return null;
+  const I = ta.indicators(candles);
+  const last = candles.length - 1;
+  const busyUntil = {};
+  let wins = 0;
+  let losses = 0;
+  let timeouts = 0;
+  const returns = [];
+  for (let i = 60; i < last - 1; i++) {
+    for (const s of setupsAt(I, i)) {
+      if ((busyUntil[s.key] ?? -1) >= i) continue;
+      const plan = planFor(candles, I, i, s.direction);
+      if (!plan) continue;
+      const up = s.direction === "up";
+      let outcome = null;
+      let j = i + 1;
+      for (; j <= Math.min(last, i + horizon); j++) {
+        const c = candles[j];
+        if (up ? c.low <= plan.stop : c.high >= plan.stop) {
+          outcome = "loss";
+          break;
+        }
+        if (up ? c.high >= plan.target : c.low <= plan.target) {
+          outcome = "win";
+          break;
+        }
+      }
+      busyUntil[s.key] = j;
+      if (outcome === "win") {
+        wins += 1;
+        returns.push(plan.gainPct);
+      } else if (outcome === "loss") {
+        losses += 1;
+        returns.push(-plan.lossPct);
+      } else {
+        timeouts += 1;
+        const end = candles[Math.min(last, i + horizon)].close;
+        returns.push(up ? pct(end, plan.entry) : -pct(end, plan.entry));
+      }
+    }
+  }
+  const n = wins + losses + timeouts;
+  return {
+    n,
+    wins,
+    losses,
+    timeouts,
+    hitRate: n ? round(wins / n, 3) : null,
+    avgReturnPct: n ? round(returns.reduce((a, b) => a + b, 0) / n, 2) : null,
+  };
+}
+
+/** About what an at-the-money contract costs (3–7 weeks out, delta near 0.5): { cost, strike, expiration } or null. */
+function atmCost(price, chains, { now = new Date(), r = 0.04 } = {}) {
+  let best = null;
+  for (const chain of chains || []) {
+    const exp = new Date(chain.expiration ?? chain.expirationDate);
+    const days = (exp - now) / DAY_MS;
+    if (!(days >= 14 && days <= 60)) continue;
+    for (const c of chain.calls || []) {
+      const bid = Number(c.bid) || 0;
+      const ask = Number(c.ask) || 0;
+      const iv = Number(c.impliedVolatility) || 0;
+      if (!(bid > 0 && ask > 0 && iv > 0.01)) continue;
+      const { delta } = blackScholes({ S: price, K: c.strike, T: days / 365, sigma: iv, r, type: "call" });
+      const fit = Math.abs(delta - 0.5) + Math.abs(days - 35) / 365;
+      if (!best || fit < best.fit) best = { fit, cost: round(((bid + ask) / 2) * 100, 0), strike: c.strike, expiration: exp.toISOString().slice(0, 10), openInterest: Number(c.openInterest) || 0 };
+    }
+  }
+  if (!best) return null;
+  const { fit, ...rest } = best; // eslint-disable-line no-unused-vars
+  return rest;
 }
 
 // ── Sizing and the record ──────────────────────────────────────────────
@@ -482,4 +589,4 @@ function record(plays) {
   return { all: group(closed), byBase, byKind, open: plays.filter((p) => p.status === "open").length };
 }
 
-module.exports = { BASES, DEFAULT_SPLIT, LADDER, MAX_TARGET_ATR, scoreFor, baseFor, setupsAt, levels, planFor, history, ideasFor, normCdf, blackScholes, optionLadder, sizeFor, returnPct, checkPlay, record };
+module.exports = { BASES, DEFAULT_SPLIT, LADDER, MAX_TARGET_ATR, scoreFor, baseFor, setupsAt, levels, planFor, history, ideasFor, normCdf, blackScholes, optionLadder, symbolFit, atmCost, sizeFor, returnPct, checkPlay, record };

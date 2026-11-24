@@ -26,6 +26,7 @@ async function settingsFor(owner) {
     weeklyRisk: s.weeklyRisk ?? 200,
     split: { ...T.DEFAULT_SPLIT, ...(s.split || {}) },
     minScore: s.minScore ?? 45,
+    maxContract: s.maxContract ?? null,
     alerts: s.alerts ?? true,
   };
 }
@@ -49,7 +50,7 @@ async function scan(owner, { kinds = ["stock", "crypto"], now = new Date() } = {
       for (const idea of T.ideasFor(symbol, candles, { kind })) {
         if (kind === "stock") {
           try {
-            idea.options = T.optionLadder(idea, await market.optionChains(symbol), { now }).map((o) => ({ ...o, size: T.sizeFor({ base: o.base, kind: "option", premium: o.mid, lossPct: o.lossPct }, s) }));
+            idea.options = T.optionLadder(idea, await market.optionChains(symbol), { now, maxCost: s.maxContract }).map((o) => ({ ...o, size: T.sizeFor({ base: o.base, kind: "option", premium: o.mid, lossPct: o.lossPct }, s) }));
           } catch (err) {
             idea.options = [];
             idea.optionsError = "Couldn't load the option chain.";
@@ -138,7 +139,7 @@ exports.lookup = async (req, res) => {
   const s = await settingsFor(req.user.id);
   const ideas = T.ideasFor(symbol, candles, { kind });
   for (const idea of ideas) {
-    if (kind === "stock") idea.options = T.optionLadder(idea, await market.optionChains(symbol).catch(() => [])).map((o) => ({ ...o, size: T.sizeFor({ base: o.base, kind: "option", premium: o.mid, lossPct: o.lossPct }, s) }));
+    if (kind === "stock") idea.options = T.optionLadder(idea, await market.optionChains(symbol).catch(() => []), { maxCost: s.maxContract }).map((o) => ({ ...o, size: T.sizeFor({ base: o.base, kind: "option", premium: o.mid, lossPct: o.lossPct }, s) }));
     if (!idea.optionsOnly) idea.size = T.sizeFor({ base: idea.base, kind, entry: idea.entry, stop: idea.stop }, s);
   }
   const last = candles[candles.length - 1];
@@ -222,7 +223,72 @@ exports.refresh = async (req, res) => {
   res.json({ success: true, hits: events.map((e) => ({ id: String(e.play._id), hit: e.hit, price: e.price })) });
 };
 
-/** PATCH /trading/settings { stocks?, crypto?, weeklyRisk?, split?, minScore?, alerts? } */
+// Liquid names with active options, many under $50 (prices are checked live; this is only who to look at).
+const STOCK_CANDIDATES = ["SOFI", "F", "INTC", "BAC", "T", "PFE", "AAL", "CCL", "NIO", "RIVN", "LCID", "SNAP", "HOOD", "MARA", "RIOT", "CLSK", "PLUG", "NU", "GRAB", "WBD", "KVUE", "VALE", "ITUB", "BBD", "CSCO", "KO", "WFC", "C", "UBER", "SMCI", "AMD", "SIRI", "OPEN", "CHPT", "DKNG", "AFRM", "UPST", "PINS", "KMI", "XLF", "XLE", "SLV", "GDX", "TLT", "IBIT"];
+const CRYPTO_CANDIDATES = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "BNB-USD", "DOGE-USD", "ADA-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "DOT-USD", "BCH-USD", "XLM-USD", "TRX-USD", "HBAR-USD", "NEAR-USD", "SUI-USD", "UNI-USD", "AAVE-USD", "ATOM-USD"];
+
+async function pool(list, n, fn) {
+  const out = [];
+  let i = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(n, list.length) }, async () => {
+      while (i < list.length) {
+        const item = list[i++];
+        try {
+          const r = await fn(item);
+          if (r) out.push(r);
+        } catch {
+          // a symbol Yahoo won't give us is just left out
+        }
+      }
+    }),
+  );
+  return out;
+}
+
+/**
+ * GET /trading/discover?kind=stock|crypto&maxPrice=: symbols worth adding.
+ * Stocks: today's most active plus a list of liquid names, under maxPrice,
+ * with about what an at-the-money contract costs. Each ranked by how our
+ * setups did on it over the last two years (average result per trade).
+ */
+exports.discover = async (req, res) => {
+  const kind = req.query.kind === "crypto" ? "crypto" : "stock";
+  const s = await settingsFor(req.user.id);
+  const have = new Set(kind === "crypto" ? s.crypto : s.stocks);
+  const maxPrice = Math.max(1, Math.min(10000, Number(req.query.maxPrice) || 50));
+  let candidates;
+  if (kind === "crypto") candidates = CRYPTO_CANDIDATES.map((symbol) => ({ symbol }));
+  else {
+    const actives = await market.mostActive(100).catch(() => []);
+    const seen = new Set();
+    candidates = [...actives.map((a) => a.symbol), ...STOCK_CANDIDATES].filter((x) => x && /^[A-Z.]{1,6}$/.test(x) && !seen.has(x) && seen.add(x)).map((symbol) => ({ symbol }));
+    const q = await market.quotes(candidates.map((c) => c.symbol)).catch(() => ({}));
+    candidates = candidates.filter((c) => q[c.symbol]?.price && q[c.symbol].price <= maxPrice && q[c.symbol].price >= 2).slice(0, 24);
+  }
+  const rows = await pool(candidates, 6, async ({ symbol }) => {
+    const candles = await market.dailyCandles(symbol);
+    const fit = T.symbolFit(candles);
+    if (!fit || fit.n < 6) return null;
+    const price = candles[candles.length - 1].close;
+    const avgVolume = Math.round(candles.slice(-20).reduce((a, c) => a + c.volume, 0) / 20);
+    let atm = null;
+    if (kind === "stock") atm = T.atmCost(price, await market.optionChains(symbol).catch(() => []));
+    if (kind === "stock" && !atm) return null; // no usable options
+    return { symbol, price: Math.round(price * 100) / 100, avgVolume, fit, atm, onList: have.has(symbol), fitsBudget: atm && s.maxContract ? atm.cost <= s.maxContract : null };
+  });
+  rows.sort((a, b) => (b.fit.avgReturnPct ?? -99) - (a.fit.avgReturnPct ?? -99) || (b.fit.hitRate ?? 0) - (a.fit.hitRate ?? 0));
+  res.json({
+    success: true,
+    kind,
+    maxPrice: kind === "stock" ? maxPrice : null,
+    maxContract: s.maxContract,
+    rows,
+    note: "Ranked by how our setups did on each symbol over the last two years: the average result per trade, then how often they hit the target. Past fit, not a promise.",
+  });
+};
+
+/** PATCH /trading/settings { stocks?, crypto?, weeklyRisk?, split?, minScore?, alerts?, maxContract? } */
 exports.updateSettings = async (req, res) => {
   const b = req.body || {};
   const set = {};
@@ -231,6 +297,7 @@ exports.updateSettings = async (req, res) => {
   if (b.weeklyRisk !== undefined) set.weeklyRisk = Math.max(0, Math.min(1000000, Number(b.weeklyRisk) || 0));
   if (b.minScore !== undefined) set.minScore = Math.max(0, Math.min(100, Number(b.minScore) || 0));
   if (b.alerts !== undefined) set.alerts = Boolean(b.alerts);
+  if (b.maxContract !== undefined) set.maxContract = b.maxContract === null || b.maxContract === "" || !(Number(b.maxContract) > 0) ? null : Math.min(100000, Math.round(Number(b.maxContract)));
   if (b.split) {
     const split = Object.fromEntries(["single", "double", "triple", "homeRun"].map((k) => [k, Math.max(0, Math.min(100, Number(b.split[k]) || 0))]));
     const total = Object.values(split).reduce((a, c) => a + c, 0);

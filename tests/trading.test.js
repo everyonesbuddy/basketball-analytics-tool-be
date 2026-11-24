@@ -142,6 +142,51 @@ test("option ladder: one contract per base from the chain, priced and projected"
   close(by.double.cost, by.double.mid * 100, 1);
 });
 
+test("option ladder with a budget: each base picks what fits, flags what doesn't, adds a budget pick", () => {
+  const now = new Date("2026-11-23T15:00:00Z");
+  const idea = { direction: "up", price: 100, target: 108, stop: 96 };
+  const exps = [14, 35].map((d) => new Date(now.getTime() + d * 86400000));
+  const chains = exps.map((exp) => {
+    const T_ = (exp - now) / 86400000 / 365;
+    return {
+      expiration: exp,
+      calls: [80, 85, 90, 95, 100, 102.5, 105, 107.5, 110, 115, 120].map((K) => {
+        const mid = T.blackScholes({ S: 100, K, T: T_, sigma: 0.35, type: "call" }).price;
+        return { contractSymbol: `B${K}C${exp.toISOString().slice(5, 10)}`, strike: K, bid: mid * 0.97, ask: mid * 1.03, impliedVolatility: 0.35, openInterest: 500, volume: 40 };
+      }),
+      puts: [],
+    };
+  });
+  const free = T.optionLadder(idea, chains, { now });
+  assert.ok(free.every((p) => p.overBudget === false), "no budget: nothing over it");
+  const picks = T.optionLadder(idea, chains, { now, maxCost: 150 });
+  const single = picks.find((p) => p.intent === "single");
+  assert.ok(single.overBudget && single.cost > 150, "an in-the-money contract on a $100 stock can't fit $150: shown, flagged");
+  const fitting = picks.filter((p) => !p.overBudget);
+  assert.ok(fitting.length >= 1 && fitting.every((p) => p.cost <= 150), "what fits stays under $150");
+  const budget = picks.find((p) => p.intent === "budget");
+  if (fitting.filter((p) => p.intent !== "budget").length < 2) assert.ok(budget && budget.cost <= 150 && budget.gainPct > 0, "and a best-under-budget pick is added");
+});
+
+test("symbol fit: every setup replayed with its own plan; ATM contract cost", () => {
+  // A steady uptrend with regular dips: pullbacks should mostly work.
+  const closes = Array.from({ length: 400 }, (_, i) => 50 + i * 0.1 + 3 * Math.sin(i / 4));
+  const fit = T.symbolFit(candles(closes));
+  assert.ok(fit && fit.n > 5, JSON.stringify(fit));
+  assert.equal(fit.wins + fit.losses + fit.timeouts, fit.n);
+  assert.ok(fit.hitRate >= 0 && fit.hitRate <= 1);
+  assert.equal(T.symbolFit(candles(closes.slice(0, 50))), null, "too little history");
+  const now = new Date("2026-11-23T15:00:00Z");
+  const exp = new Date(now.getTime() + 35 * 86400000);
+  const calls = [18, 19, 20, 21, 22].map((K) => {
+    const mid = T.blackScholes({ S: 20, K, T: 35 / 365, sigma: 0.5, type: "call" }).price;
+    return { strike: K, bid: mid * 0.97, ask: mid * 1.03, impliedVolatility: 0.5, openInterest: 900 };
+  });
+  const atm = T.atmCost(20, [{ expiration: exp, calls }], { now });
+  assert.ok(atm.strike === 20 || atm.strike === 21, JSON.stringify(atm));
+  assert.ok(atm.cost > 50 && atm.cost < 250, "a $20 stock's ATM call costs about $100–200");
+});
+
 test("sizing: a stop-out loses about the base's share of the weekly risk", () => {
   const s = T.sizeFor({ base: "single", kind: "stock", entry: 100, stop: 95 }, { weeklyRisk: 200 });
   assert.equal(s.budget, 100);

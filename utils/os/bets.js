@@ -289,7 +289,69 @@ function analyzeGame(game, rt, { blend = 0.5 } = {}) {
   }
   const conf = (l) => (proj.games < S.minGames ? "low" : l.edge >= 0.06 ? "high" : l.edge >= 0.035 ? "medium" : "low");
   const sdOf = (l) => (l.market === "spread" ? S.marginSd : l.market === "total" ? S.totalSd : null);
-  return { ...game, projection: { margin: round(proj.margin, 1), total: round(proj.total, 1), games: proj.games }, legs: legs.map((l) => ({ ...l, confidence: conf(l), shop: shopRange(l, sdOf(l)) })) };
+  return {
+    ...game,
+    projection: { margin: round(proj.margin, 1), total: round(proj.total, 1), games: proj.games },
+    explain: explainGame(game, rt, proj, { blend }),
+    legs: legs.map((l) => ({ ...l, confidence: conf(l), shop: shopRange(l, sdOf(l)) })),
+  };
+}
+
+const half = (x) => Math.round(x * 2) / 2;
+const fmtSpread = (abbr, x) => `${abbr} ${x > 0 ? `+${x}` : x === 0 ? "PK" : x}`;
+const r1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
+const signed1 = (x) => `${x >= 0 ? "+" : "−"}${r1(Math.abs(x))}`;
+
+/**
+ * The game in words: our line and how we got it, the book's line, the
+ * middle line we actually bet from (our chance blended with the book's),
+ * and why the two might disagree.
+ */
+function explainGame(game, rt, proj, { blend = 0.5 } = {}) {
+  const S = SPORTS[game.sport];
+  const h = rt.teams[game.home.id];
+  const a = rt.teams[game.away.id];
+  const L = game.lines || {};
+  const H = game.home.abbr;
+  const A = game.away.abbr;
+  const fav = (m) => (m >= 0 ? H : A);
+  const ours = { spread: half(-proj.margin), total: half(proj.total), homeWin: round(normCdf(proj.margin / S.marginSd)) };
+  const book = { spread: L.homeSpread ?? null, total: L.total ?? null, homeWin: L.homeMl && L.awayMl ? round(fairPair(L.homeMl, L.awayMl)?.[0]) : null };
+  // The middle line: where our blended chance would be a coin flip.
+  const middle = { spread: null, total: null, homeWin: ours.homeWin !== null && book.homeWin !== null ? round(blend * ours.homeWin + (1 - blend) * book.homeWin) : null };
+  if (book.spread !== null) {
+    const fair = fairPair(L.homeSpreadOdds, L.awaySpreadOdds)?.[0] ?? 0.5;
+    const p = blend * normCdf((proj.margin + book.spread) / S.marginSd) + (1 - blend) * fair;
+    middle.spread = half(-(S.marginSd * invNorm(p) - book.spread));
+  }
+  if (book.total !== null) {
+    const fair = fairPair(L.overOdds, L.underOdds)?.[0] ?? 0.5;
+    const p = blend * (1 - normCdf((book.total - proj.total) / S.totalSd)) + (1 - blend) * fair;
+    middle.total = half(book.total + S.totalSd * invNorm(p));
+  }
+  const how = [
+    `${H} rates ${signed1(h.rating)} and ${A} ${signed1(a.rating)}: how many points each beats an average team by on a neutral ${game.sport === "nfl" ? "field" : "floor"}, from this season's scores adjusted for who they played (${Math.min(h.games, a.games)} games each).`,
+    `${r1(h.rating)} − (${r1(a.rating)}) = ${r1(h.rating - a.rating)}, plus ${S.homeEdge} for home ${game.sport === "nfl" ? "field" : "court"} → ${fav(proj.margin)} by ${r1(Math.abs(proj.margin))}, so our spread is ${fmtSpread(H, ours.spread)}.`,
+    `Points: ${H} scores ${r1(h.ppg)} and allows ${r1(h.oppPpg)}; ${A} scores ${r1(a.ppg)} and allows ${r1(a.oppPpg)} (league ${r1(rt.league)}). Each side's offense against the other's defense → ${r1(proj.total)}, so our total is ${ours.total}.`,
+  ];
+  const why = [];
+  if (book.spread !== null) {
+    const gap = ours.spread - book.spread; // + means we like the away side more than the book does
+    if (Math.abs(gap) < 1) why.push(`The book's spread (${fmtSpread(H, book.spread)}) is within a point of ours: no real disagreement.`);
+    else why.push(`The book has ${fmtSpread(H, book.spread)}; we have ${fmtSpread(H, ours.spread)}. That's ${r1(Math.abs(gap))} points ${gap < 0 ? `more on ${H}` : `more on ${A}`} than the book.`);
+  }
+  if (book.total !== null) {
+    const gap = ours.total - book.total;
+    if (Math.abs(gap) >= 1.5) why.push(`The book's total is ${book.total}; ours is ${ours.total} (${gap > 0 ? "higher" : "lower"} by ${r1(Math.abs(gap))}).`);
+  }
+  const big = game.sport === "nfl" ? 4 : 6;
+  if (book.spread !== null && Math.abs(ours.spread - book.spread) >= big)
+    why.push(`A gap this big usually means news our numbers can't see: injuries, rest, a trade. Check the injury report before betting it.`);
+  why.push(
+    `Why books differ from us: they price in injuries, rest days, travel and recent form, and sharp bettors move their lines. We only see this season's scores. That's why we blend half and half with the book and bet from the middle line, not ours.`,
+  );
+  if (Math.min(h.games, a.games) < S.minGames) why.push(`Early season: ${Math.min(h.games, a.games)} games is a small sample, so treat our line loosely.`);
+  return { ours, book, middle, how, why };
 }
 
 /** The ideas worth a look: legs with at least `minEdge` edge, best first, one per market per game. */
@@ -425,4 +487,4 @@ function seasonStart(sport, now = new Date()) {
   return new Date(Date.UTC(y, m, 1));
 }
 
-module.exports = { SPORTS, normCdf, invNorm, shopRange, toDecimal, breakEven, toAmerican, fairPair, ratings, project, parseEvent, finals, analyzeGame, pickIdeas, parlays, parseFutures, futuresValue, settleLeg, settleBet, betRecord, seasonStart };
+module.exports = { SPORTS, normCdf, invNorm, shopRange, explainGame, toDecimal, breakEven, toAmerican, fairPair, ratings, project, parseEvent, finals, analyzeGame, pickIdeas, parlays, parseFutures, futuresValue, settleLeg, settleBet, betRecord, seasonStart };
