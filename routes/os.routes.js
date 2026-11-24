@@ -53,6 +53,7 @@ const tr = require("../controllers/trading.controller");
 router.get("/trading", asyncHandler(tr.overview));
 router.post("/trading/scan", asyncHandler(tr.scanNow));
 router.get("/trading/symbol/:symbol", asyncHandler(tr.lookup));
+router.get("/trading/discover", asyncHandler(tr.discover));
 router.patch("/trading/settings", asyncHandler(tr.updateSettings));
 router.post("/trading/plays", asyncHandler(tr.addPlay));
 router.post("/trading/plays/refresh", asyncHandler(tr.refresh));

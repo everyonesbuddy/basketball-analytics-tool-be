@@ -63,7 +63,8 @@ exports.props = async (req, res) => {
   }
   games = games.sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, sport === "nfl" ? 16 : 12);
   const lines = await Promise.allSettled(games.map((g) => data.propLines(sport, g.id)));
-  const withLines = games.map((g, i) => ({ g, lines: lines[i].status === "fulfilled" ? lines[i].value : [] })).filter((x) => x.lines.length);
+  const withLines = games.map((g, i) => ({ g, lines: lines[i].status === "fulfilled" ? lines[i].value || [] : [] })).filter((x) => x.lines.length);
+  const notPosted = lines.filter((r) => r.status === "fulfilled" && r.value === null).length;
   const problems = [];
   const failed = lines.filter((r) => r.status === "rejected").length;
   if (failed) problems.push(`Prop lines didn't load for ${failed} game${failed === 1 ? "" : "s"} (${lines.find((r) => r.status === "rejected").reason?.message}).`);
@@ -83,6 +84,7 @@ exports.props = async (req, res) => {
     stats: P.STATS[sport],
     games: games.map((g) => ({ id: g.id, name: g.name, date: g.date, day: easternDate(g.date), props: withLines.find((x) => x.g.id === g.id)?.lines.length || 0 })),
     lines: legs.length / 2,
+    notPosted,
     ideas,
     problems,
     note: "Lines are DraftKings' main lines via ESPN, priced as -110; your book may differ. The model is each player's last 15 games (the last 5 count double), blended half and half with the line. It doesn't know injuries, minutes limits or matchups.",

@@ -98,7 +98,14 @@ async function propLines(sport, eventId) {
   return cached(`props:${sport}:${eventId}`, 15 * 60 * 1000, async () => {
     const items = [];
     for (let page = 1; page <= 10; page++) {
-      const json = await getJson(`${CORE}/${p1}/leagues/${p2}/events/${eventId}/competitions/${eventId}/odds/${DRAFTKINGS}/propBets`, { lang: "en", region: "us", limit: 1000, page });
+      let json;
+      try {
+        json = await getJson(`${CORE}/${p1}/leagues/${p2}/events/${eventId}/competitions/${eventId}/odds/${DRAFTKINGS}/propBets`, { lang: "en", region: "us", limit: 1000, page });
+      } catch (err) {
+        // 404: DraftKings hasn't posted props for this game yet (usually the morning of it).
+        if (err.statusCode === 404) return null;
+        throw err;
+      }
       items.push(...(json?.items || []));
       if (page >= Number(json?.pageCount || 1)) break;
     }

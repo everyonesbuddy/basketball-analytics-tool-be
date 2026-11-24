@@ -166,3 +166,34 @@ test("GET /sports/props: DraftKings lines via ESPN against players' recent box s
   assert.ok(i.shop.worstLine >= 24.5 && i.shop.worstOdds < -110, JSON.stringify(i.shop));
   assert.equal(i.shop.worstLine % 1, 0.5, "prop ranges stay on .5 lines");
 });
+
+test("explaining a game: our line, the book's, the middle we bet from, and why", () => {
+  const rt = { league: 113.4, teams: { 2: { rating: 6.5, ppg: 117, oppPpg: 110, games: 16 }, 20: { rating: -2.1, ppg: 112, oppPpg: 114.5, games: 16 } } };
+  const g = { id: "g", sport: "nba", home: { id: "2", abbr: "BOS" }, away: { id: "20", abbr: "PHI" }, lines: { homeSpread: -5.5, homeSpreadOdds: -110, awaySpreadOdds: -110, total: 221.5, overOdds: -110, underOdds: -110, homeMl: -230, awayMl: 190 } };
+  const e = B.analyzeGame(g, rt).explain;
+  assert.equal(e.ours.spread, -11, "BOS by 10.9 rounds to -11");
+  assert.equal(e.book.spread, -5.5);
+  assert.ok(e.middle.spread < e.book.spread && e.middle.spread > e.ours.spread, "the middle sits between");
+  assert.ok(e.middle.total > 221.5 && e.middle.total < e.ours.total);
+  assert.match(e.how[1], /BOS by 10\.9/);
+  assert.match(e.why[0], /5\.5 points more on BOS/);
+  assert.ok(!e.why.some((w) => /injury report/.test(w)), "5.5 points: under the 6-point warning");
+});
+
+test("props: a 404 from ESPN means not posted yet, not an error", async () => {
+  const espn = require("../services/espn/espnClient");
+  const data = require("../services/os/sportsData");
+  data._clearCache();
+  const orig = espn.getJson;
+  espn.getJson = async () => {
+    const e = new Error("ESPN request failed (404)");
+    e.statusCode = 404;
+    throw e;
+  };
+  try {
+    assert.equal(await data.propLines("nba", "401909318"), null);
+  } finally {
+    espn.getJson = orig;
+    data._clearCache();
+  }
+});

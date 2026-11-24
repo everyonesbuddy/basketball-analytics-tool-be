@@ -16,6 +16,7 @@ const settingsSchema = new mongoose.Schema(
       homeRun: { type: Number, min: 0, max: 100, default: 5 },
     },
     minScore: { type: Number, min: 0, max: 100, default: 45 }, // ideas below this aren't shown or sent
+    maxContract: { type: Number, min: 0, max: 100000, default: null }, // $ per option contract you'll pay; null = no limit
     alerts: { type: Boolean, default: true },
   },
   { timestamps: true },

@@ -79,4 +79,12 @@ async function optionChains(symbol, { minDays = 6, maxDays = 75, max = 4 } = {})
   });
 }
 
-module.exports = { dailyCandles, quotes, optionChains };
+/** Yahoo's most active US stocks today: [{ symbol, price, volume, name }]. */
+async function mostActive(count = 100) {
+  return cached(`actives:${count}`, 60 * 60 * 1000, async () => {
+    const r = await yf().screener({ scrIds: "most_actives", count });
+    return (r.quotes || []).map((q) => ({ symbol: q.symbol, price: q.regularMarketPrice ?? null, volume: q.regularMarketVolume ?? q.averageDailyVolume3Month ?? null, name: q.shortName || q.longName || q.symbol }));
+  });
+}
+
+module.exports = { dailyCandles, quotes, optionChains, mostActive };
